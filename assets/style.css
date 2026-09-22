@@ -139,6 +139,26 @@ body {
   background: var(--gridline);
 }
 
+.slicer-btn {
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 5px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.slicer-btn:hover {
+  background: var(--gridline);
+}
+
+.slicer-btn.active {
+  background: var(--series-1);
+  border-color: var(--series-1);
+  color: #fff;
+}
+
 .card {
   background: var(--surface-1);
   border: 1px solid var(--border);
