@@ -2,50 +2,74 @@
   "use strict";
 
   const PLATFORM_LABEL = { coupang: "쿠팡", naver: "네이버" };
+  const PLATFORMS = ["coupang", "naver"];
   const PAGE_SIZE = 50;
 
-  const PLATFORMS = ["coupang", "naver"];
+  // 실제 raw 컬럼명이 플랫폼마다 다르므로, 리포트 필드 <-> raw 컬럼명 매핑표.
+  // null이면 아래 FIELD_AUTO_PATTERNS로 자동 추정하고, NOT_MAPPED이면 추정도 하지 않고 "-"로 비워둔다.
+  const NOT_MAPPED = Symbol("not-mapped");
+  const FIELD_MAP = {
+    coupang: {
+      date: "날짜",
+      campaign: "캠페인명",
+      group: "광고그룹",
+      cost: "광고비",
+      impressions: "노출수",
+      clicks: "클릭수",
+      conversions: "직접 판매수량(1일)",
+      revenue: "직접 전환매출액(1일)",
+    },
+    naver: {
+      date: null,
+      campaign: null,
+      group: null,
+      cost: null,
+      impressions: null,
+      clicks: null,
+      // 네이버 raw 샘플을 아직 못 봐서 전환수/전환매출 컬럼명을 확정하지 못했다.
+      // 실제 파일을 받으면 위 coupang처럼 정확한 컬럼명으로 채워 넣으면 된다.
+      conversions: NOT_MAPPED,
+      revenue: NOT_MAPPED,
+    },
+  };
+
+  // 명시적 매핑이 없을 때(null) 컬럼명을 추정하는 패턴. "클릭률"이 "클릭수"로 오인되지 않도록 주의.
+  const FIELD_AUTO_PATTERNS = {
+    date: /날짜|일자|date/i,
+    campaign: /^캠페인명$|^캠페인$/i,
+    group: /그룹명|광고그룹|^그룹$/i,
+    cost: /광고비|총비용|^비용$|spend|cost/i,
+    impressions: /노출수|^노출$|impression/i,
+    clicks: /클릭수|^클릭$/i,
+  };
+
+  const METRIC_COLUMNS = [
+    { key: "cost", label: "광고비", deps: ["cost"], format: "money" },
+    { key: "impressions", label: "노출", deps: ["impressions"], format: "count" },
+    { key: "clicks", label: "클릭", deps: ["clicks"], format: "count" },
+    { key: "ctr", label: "CTR", deps: ["clicks", "impressions"], format: "pct" },
+    { key: "cpc", label: "CPC", deps: ["cost", "clicks"], format: "money" },
+    { key: "conversions", label: "전환수", deps: ["conversions"], format: "count" },
+    { key: "revenue", label: "전환매출", deps: ["revenue"], format: "money" },
+    { key: "cvr", label: "CVR", deps: ["conversions", "clicks"], format: "pct" },
+    { key: "aov", label: "객단가", deps: ["revenue", "conversions"], format: "money" },
+    { key: "roas", label: "ROAS", deps: ["revenue", "cost"], format: "pct" },
+  ];
+  const METRIC_BY_KEY = Object.fromEntries(METRIC_COLUMNS.map((m) => [m.key, m]));
 
   const state = {
     manifest: { files: [] },
     selectedPaths: new Set(),
-    rows: [],
-    columns: [],
-    colsByFile: new Map(), // filePath -> Set(컬럼명) — 같은 플랫폼이어도 광고상품별로 raw 컬럼 구성이 다를 수 있어 파일 단위로 관리
-    dateColumnByFile: new Map(), // filePath -> 자동 감지된 날짜 컬럼명
-    manualDateColumn: null, // 사용자가 직접 고른 날짜 컬럼명 (null이면 자동 감지 사용)
-    metricColumns: new Set(),
-    numericColumns: [],
+    rows: [], // 원본 raw 행 (플랫폼/파일 태그 포함)
+    colsByFile: new Map(), // filePath -> Set(원본 컬럼명)
+    activePlatform: "coupang",
+    visibleMetrics: new Set(), // 기본은 비어있음 = 날짜/캠페인명/그룹명만 표시
+    aggregatedRows: [], // 현재 플랫폼 기준, (날짜,캠페인명,그룹명)으로 합산된 행
     search: "",
     sortColumn: null,
     sortDir: 1,
     page: 1,
   };
-
-  function platformsInRows() {
-    return PLATFORMS.filter((p) => state.rows.some((r) => r.__platform === p));
-  }
-
-  function filesInRows() {
-    return [...new Set(state.rows.map((r) => r.__filePath))];
-  }
-
-  // 같은 플랫폼이라도 광고상품(리포트 종류)마다 컬럼 구성이 다를 수 있어
-  // (예: 쿠팡 "날짜" vs 네이버 "일자", 혹은 같은 쿠팡이라도 상품별로 컬럼이 다름),
-  // 파일 단위로 실제 존재하는 컬럼 중에서만 날짜 컬럼을 찾는다.
-  function resolveDateColumn(filePath) {
-    if (state.manualDateColumn && state.colsByFile.get(filePath)?.has(state.manualDateColumn)) {
-      return state.manualDateColumn;
-    }
-    return state.dateColumnByFile.get(filePath) || null;
-  }
-
-  function applyDates() {
-    for (const row of state.rows) {
-      const col = resolveDateColumn(row.__filePath);
-      row.__date = col ? parseDateLoose(row[col]) : null;
-    }
-  }
 
   const el = (id) => document.getElementById(id);
 
@@ -114,13 +138,47 @@
     return `${m[1]}-${mm}-${dd}`;
   }
 
-  function formatNumber(n) {
-    if (!Number.isFinite(n)) return "-";
-    return n.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
+  function formatMetric(value, format) {
+    if (value == null || !Number.isFinite(value)) return "-";
+    if (format === "pct") return `${value.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}%`;
+    if (format === "money") return `${Math.round(value).toLocaleString("ko-KR")}원`;
+    return value.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
   }
 
-  function cssVar(name) {
-    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    }[c]));
+  }
+
+  // ---------- 컬럼 매핑 ----------
+
+  // platform의 field(날짜/캠페인/그룹/광고비 등)가 filePath 안에서 어떤 실제 컬럼명인지 찾는다.
+  function resolveField(filePath, platform, field) {
+    const cols = state.colsByFile.get(filePath);
+    if (!cols) return null;
+    const mapped = FIELD_MAP[platform]?.[field];
+    if (mapped === NOT_MAPPED) return null;
+    if (mapped) return cols.has(mapped) ? mapped : null;
+    const pattern = FIELD_AUTO_PATTERNS[field];
+    if (pattern) {
+      for (const c of cols) if (pattern.test(c)) return c;
+    }
+    return null;
+  }
+
+  function filesForPlatform(platform) {
+    return state.manifest.files.filter((f) => f.platform === platform && state.selectedPaths.has(f.path)).map((f) => f.path);
+  }
+
+  function isMetricAvailable(platform, metricKey) {
+    const deps = METRIC_BY_KEY[metricKey].deps;
+    const paths = filesForPlatform(platform);
+    return paths.some((fp) => deps.every((d) => resolveField(fp, platform, d)));
   }
 
   // ---------- 데이터 로드 ----------
@@ -134,7 +192,6 @@
     }
     if (!Array.isArray(state.manifest.files)) state.manifest.files = [];
     state.selectedPaths = new Set(state.manifest.files.map((f) => f.path));
-    renderFileList();
     await reloadSelectedData();
   }
 
@@ -152,144 +209,136 @@
       }
     }
     state.rows = allRows;
-    computeColumns();
+    computeColsByFile();
     state.page = 1;
     renderAll();
   }
 
-  function computeColumns() {
-    const cols = new Set();
-    const colsByFile = new Map();
+  function computeColsByFile() {
+    const map = new Map();
     for (const row of state.rows) {
-      if (!colsByFile.has(row.__filePath)) colsByFile.set(row.__filePath, new Set());
-      const fileCols = colsByFile.get(row.__filePath);
+      if (!map.has(row.__filePath)) map.set(row.__filePath, new Set());
+      const set = map.get(row.__filePath);
       for (const k of Object.keys(row)) {
-        if (k === "__platform" || k === "__file" || k === "__filePath" || k === "__date") continue;
-        cols.add(k);
-        fileCols.add(k);
+        if (k.startsWith("__")) continue;
+        set.add(k);
       }
     }
-    state.columns = [...cols];
-    state.colsByFile = colsByFile;
-
-    state.dateColumnByFile = new Map();
-    for (const filePath of filesInRows()) {
-      state.dateColumnByFile.set(filePath, detectDateColumnForFile(filePath));
-    }
-    applyDates();
-
-    state.numericColumns = detectNumericColumns();
-
-    if (state.metricColumns.size === 0) {
-      const preferred = state.numericColumns.filter((c) =>
-        /비용|cost|spend|광고비|노출|impression|클릭|click|전환|conversion/i.test(c)
-      );
-      const defaults = (preferred.length ? preferred : state.numericColumns).slice(0, 2);
-      state.metricColumns = new Set(defaults);
-    } else {
-      // 파일이 바뀌어 더 이상 존재하지 않는 컬럼은 선택에서 제거
-      for (const c of [...state.metricColumns]) {
-        if (!state.numericColumns.includes(c)) state.metricColumns.delete(c);
-      }
-    }
+    state.colsByFile = map;
   }
 
-  // 해당 파일에 실제로 존재하는 컬럼들 중에서만 날짜 컬럼 후보를 찾는다.
-  function detectDateColumnForFile(filePath) {
-    let best = null;
-    let bestScore = 0;
-    const rows = state.rows.filter((r) => r.__filePath === filePath);
-    for (const col of state.colsByFile.get(filePath)) {
-      let hit = 0;
-      let total = 0;
-      for (const row of rows) {
-        const v = row[col];
-        if (v == null || v === "") continue;
-        total++;
-        if (parseDateLoose(v)) hit++;
+  // ---------- 집계 ----------
+
+  function computeAggregatedRows(platform) {
+    const groups = new Map();
+    for (const row of state.rows) {
+      if (row.__platform !== platform) continue;
+      if (!state.selectedPaths.has(row.__filePath)) continue;
+      const fp = row.__filePath;
+
+      const dateCol = resolveField(fp, platform, "date");
+      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      if (!date) continue;
+
+      const campaignCol = resolveField(fp, platform, "campaign");
+      const groupCol = resolveField(fp, platform, "group");
+      const campaign = campaignCol ? row[campaignCol] ?? "" : "";
+      const group = groupCol ? row[groupCol] ?? "" : "";
+
+      const key = `${date}\u0001${campaign}\u0001${group}`;
+      if (!groups.has(key)) {
+        groups.set(key, { date, campaign, group, cost: 0, impressions: 0, clicks: 0, conversions: 0, revenue: 0 });
       }
-      if (total === 0) continue;
-      let score = hit / total;
-      if (/날짜|date|일자/i.test(col)) score += 0.05;
-      if (score > bestScore) {
-        bestScore = score;
-        best = col;
-      }
+      const g = groups.get(key);
+
+      const costCol = resolveField(fp, platform, "cost");
+      const imprCol = resolveField(fp, platform, "impressions");
+      const clickCol = resolveField(fp, platform, "clicks");
+      const convCol = resolveField(fp, platform, "conversions");
+      const revCol = resolveField(fp, platform, "revenue");
+
+      const cost = costCol ? parseNumberLoose(row[costCol]) : NaN;
+      const impr = imprCol ? parseNumberLoose(row[imprCol]) : NaN;
+      const clicks = clickCol ? parseNumberLoose(row[clickCol]) : NaN;
+      const conv = convCol ? parseNumberLoose(row[convCol]) : NaN;
+      const rev = revCol ? parseNumberLoose(row[revCol]) : NaN;
+
+      if (Number.isFinite(cost)) g.cost += cost;
+      if (Number.isFinite(impr)) g.impressions += impr;
+      if (Number.isFinite(clicks)) g.clicks += clicks;
+      if (Number.isFinite(conv)) g.conversions += conv;
+      if (Number.isFinite(rev)) g.revenue += rev;
     }
-    return best;
+
+    return [...groups.values()].map((g) => ({
+      ...g,
+      ctr: g.impressions > 0 ? (g.clicks / g.impressions) * 100 : null,
+      cpc: g.clicks > 0 ? g.cost / g.clicks : null,
+      cvr: g.clicks > 0 ? (g.conversions / g.clicks) * 100 : null,
+      aov: g.conversions > 0 ? g.revenue / g.conversions : null,
+      roas: g.cost > 0 ? (g.revenue / g.cost) * 100 : null,
+    }));
   }
 
-  function detectNumericColumns() {
-    const dateCols = new Set([...state.dateColumnByFile.values()].filter(Boolean));
-    const result = [];
-    for (const col of state.columns) {
-      if (dateCols.has(col)) continue;
-      let hit = 0;
-      let total = 0;
-      for (const row of state.rows) {
-        const v = row[col];
-        if (v == null || v === "") continue;
-        total++;
-        if (!Number.isNaN(parseNumberLoose(v))) hit++;
-      }
-      if (total > 0 && hit / total >= 0.6) result.push(col);
+  function recompute() {
+    state.aggregatedRows = computeAggregatedRows(state.activePlatform);
+    // 현재 플랫폼에서 더 이상 계산 불가능한 지표는 선택에서 제거
+    for (const key of [...state.visibleMetrics]) {
+      if (!isMetricAvailable(state.activePlatform, key)) state.visibleMetrics.delete(key);
     }
-    return result;
   }
 
   // ---------- 렌더링 ----------
 
   function renderAll() {
+    recompute();
+    renderTabs();
+    renderFileList();
     renderColumnControls();
     renderSummary();
-    renderCharts();
     renderTable();
+  }
+
+  function renderTabs() {
+    for (const btn of document.querySelectorAll(".tab-btn")) {
+      btn.classList.toggle("active", btn.dataset.platform === state.activePlatform);
+    }
   }
 
   function renderFileList() {
     const area = el("fileListArea");
-    if (state.manifest.files.length === 0) {
-      area.innerHTML = `<div class="empty-state">아직 업로드된 데이터가 없습니다. <code>data/coupang</code> 또는 <code>data/naver</code> 폴더에 raw csv 파일을 올려주세요.</div>`;
+    const files = state.manifest.files.filter((f) => f.platform === state.activePlatform);
+    if (files.length === 0) {
+      area.innerHTML = `<div class="empty-state">아직 업로드된 데이터가 없습니다. <code>data/${state.activePlatform}</code> 폴더에 raw csv/xlsx 파일을 올려주세요.</div>`;
       return;
     }
     area.innerHTML = "";
-    for (const platform of ["coupang", "naver"]) {
-      const files = state.manifest.files.filter((f) => f.platform === platform);
-      if (files.length === 0) continue;
-      const heading = document.createElement("div");
-      heading.style.margin = "10px 0 4px";
-      heading.style.fontSize = "12px";
-      heading.style.color = "var(--text-muted)";
-      heading.textContent = `${PLATFORM_LABEL[platform]} (${files.length}개 파일)`;
-      area.appendChild(heading);
+    for (const f of files) {
+      const row = document.createElement("div");
+      row.className = "file-row";
+      const label = document.createElement("label");
+      label.className = "file-name";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = state.selectedPaths.has(f.path);
+      checkbox.addEventListener("change", () => {
+        if (checkbox.checked) state.selectedPaths.add(f.path);
+        else state.selectedPaths.delete(f.path);
+        renderAll();
+      });
+      label.appendChild(checkbox);
+      const nameSpan = document.createElement("span");
+      nameSpan.textContent = ` ${f.name} (${formatSize(f.size)})`;
+      label.appendChild(nameSpan);
+      row.appendChild(label);
 
-      for (const f of files) {
-        const row = document.createElement("div");
-        row.className = "file-row";
-        const label = document.createElement("label");
-        label.className = "file-name";
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.checked = state.selectedPaths.has(f.path);
-        checkbox.addEventListener("change", () => {
-          if (checkbox.checked) state.selectedPaths.add(f.path);
-          else state.selectedPaths.delete(f.path);
-          reloadSelectedData();
-        });
-        label.appendChild(checkbox);
-        const nameSpan = document.createElement("span");
-        nameSpan.textContent = ` ${f.name} (${formatSize(f.size)})`;
-        label.appendChild(nameSpan);
-        row.appendChild(label);
+      const link = document.createElement("a");
+      link.href = f.path;
+      link.download = f.name;
+      link.textContent = "원본 다운로드 ↓";
+      row.appendChild(link);
 
-        const link = document.createElement("a");
-        link.href = f.path;
-        link.download = f.name;
-        link.textContent = "원본 다운로드 ↓";
-        row.appendChild(link);
-
-        area.appendChild(row);
-      }
+      area.appendChild(row);
     }
   }
 
@@ -301,49 +350,39 @@
   }
 
   function renderColumnControls() {
-    const hasData = state.rows.length > 0;
+    const hasData = state.aggregatedRows.length > 0;
     el("columnCard").style.display = hasData ? "" : "none";
     if (!hasData) return;
 
-    const dateSelect = el("dateColumnSelect");
-    dateSelect.innerHTML = "";
-    const autoOpt = document.createElement("option");
-    autoOpt.value = "";
-    autoOpt.textContent = "자동 감지";
-    dateSelect.appendChild(autoOpt);
-    for (const col of state.columns) {
-      const opt = document.createElement("option");
-      opt.value = col;
-      opt.textContent = col;
-      dateSelect.appendChild(opt);
-    }
-    dateSelect.value = state.manualDateColumn || "";
-    dateSelect.onchange = () => {
-      state.manualDateColumn = dateSelect.value || null;
-      applyDates();
-      renderDateHint();
-      renderCharts();
-    };
-    renderDateHint();
-
     const chipList = el("metricChipList");
     chipList.innerHTML = "";
-    for (const col of state.numericColumns) {
+    const unavailable = [];
+    for (const metric of METRIC_COLUMNS) {
+      const available = isMetricAvailable(state.activePlatform, metric.key);
+      if (!available) unavailable.push(metric.label);
+
       const chip = document.createElement("label");
       chip.className = "chip";
+      if (!available) chip.style.opacity = "0.4";
       const cb = document.createElement("input");
       cb.type = "checkbox";
-      cb.checked = state.metricColumns.has(col);
+      cb.disabled = !available;
+      cb.checked = state.visibleMetrics.has(metric.key);
       cb.addEventListener("change", () => {
-        if (cb.checked) state.metricColumns.add(col);
-        else state.metricColumns.delete(col);
+        if (cb.checked) state.visibleMetrics.add(metric.key);
+        else state.visibleMetrics.delete(metric.key);
         renderSummary();
-        renderCharts();
+        renderTable();
       });
       chip.appendChild(cb);
-      chip.appendChild(document.createTextNode(col));
+      chip.appendChild(document.createTextNode(metric.label));
       chipList.appendChild(chip);
     }
+
+    const hint = el("unavailableHint");
+    hint.textContent = unavailable.length
+      ? `${PLATFORM_LABEL[state.activePlatform]}에서 아직 인식되지 않는 지표: ${unavailable.join(", ")} (raw 컬럼 확인 필요)`
+      : "";
 
     el("searchInput").oninput = (e) => {
       state.search = e.target.value.trim().toLowerCase();
@@ -352,155 +391,71 @@
     };
   }
 
-  // 같은 플랫폼이라도 광고상품(리포트 종류)마다 컬럼명이 달라질 수 있어서
-  // (예: 쿠팡 "날짜" / 네이버 "일자", 혹은 같은 쿠팡이라도 상품별로 다름),
-  // 파일별로 실제로 어떤 컬럼이 날짜로 쓰이고 있는지 보여준다.
-  function renderDateHint() {
-    const hint = el("dateColumnHint");
-    if (!hint) return;
-    const files = state.manifest.files.filter((f) => state.selectedPaths.has(f.path));
-    const parts = files.map((f) => {
-      const col = resolveDateColumn(f.path);
-      return `${f.name} → ${col ? col : "인식 실패"}`;
-    });
-    const MAX_SHOWN = 4;
-    const shown = parts.slice(0, MAX_SHOWN).join(" · ");
-    const extra = parts.length > MAX_SHOWN ? ` 외 ${parts.length - MAX_SHOWN}개` : "";
-    hint.textContent = parts.length ? `현재 매칭: ${shown}${extra}` : "";
-  }
-
   function renderSummary() {
-    const hasMetrics = state.rows.length > 0 && state.metricColumns.size > 0;
+    const hasMetrics = state.aggregatedRows.length > 0 && state.visibleMetrics.size > 0;
     el("summaryCard").style.display = hasMetrics ? "" : "none";
     if (!hasMetrics) return;
 
+    const totals = { cost: 0, impressions: 0, clicks: 0, conversions: 0, revenue: 0 };
+    for (const row of state.aggregatedRows) {
+      totals.cost += row.cost;
+      totals.impressions += row.impressions;
+      totals.clicks += row.clicks;
+      totals.conversions += row.conversions;
+      totals.revenue += row.revenue;
+    }
+    const derived = {
+      ctr: totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : null,
+      cpc: totals.clicks > 0 ? totals.cost / totals.clicks : null,
+      cvr: totals.clicks > 0 ? (totals.conversions / totals.clicks) * 100 : null,
+      aov: totals.conversions > 0 ? totals.revenue / totals.conversions : null,
+      roas: totals.cost > 0 ? (totals.revenue / totals.cost) * 100 : null,
+    };
+    const combined = { ...totals, ...derived };
+
     const grid = el("statGrid");
     grid.innerHTML = "";
-    for (const metric of state.metricColumns) {
-      const totals = { coupang: 0, naver: 0 };
-      for (const row of state.rows) {
-        const n = parseNumberLoose(row[metric]);
-        if (Number.isFinite(n) && totals[row.__platform] != null) totals[row.__platform] += n;
-      }
-      const total = totals.coupang + totals.naver;
-
+    for (const key of state.visibleMetrics) {
+      const metric = METRIC_BY_KEY[key];
       const tile = document.createElement("div");
       tile.className = "stat-tile";
       tile.innerHTML = `
-        <div class="stat-label">${escapeHtml(metric)} 합계</div>
-        <div class="stat-value">${formatNumber(total)}</div>
-        <div class="stat-breakdown">
-          <span><span class="legend-dot dot-coupang"></span>쿠팡 ${formatNumber(totals.coupang)}</span>
-          <span><span class="legend-dot dot-naver"></span>네이버 ${formatNumber(totals.naver)}</span>
-        </div>`;
+        <div class="stat-label">${escapeHtml(metric.label)} 합계</div>
+        <div class="stat-value">${formatMetric(combined[key], metric.format)}</div>`;
       grid.appendChild(tile);
     }
   }
 
-  let charts = [];
+  function visibleColumns() {
+    return ["date", "campaign", "group", ...METRIC_COLUMNS.filter((m) => state.visibleMetrics.has(m.key)).map((m) => m.key)];
+  }
 
-  function renderCharts() {
-    const hasAnyDate = filesInRows().some((fp) => resolveDateColumn(fp));
-    const hasChart = state.rows.length > 0 && state.metricColumns.size > 0 && hasAnyDate;
-    el("chartCard").style.display = hasChart ? "" : "none";
-    for (const c of charts) c.destroy();
-    charts = [];
-    if (!hasChart) return;
-
-    const area = el("chartsArea");
-    area.innerHTML = "";
-
-    for (const metric of state.metricColumns) {
-      // 날짜 x 플랫폼 별 합계 집계 (row.__date는 플랫폼별로 감지된 날짜 컬럼 기준으로 이미 정규화되어 있음)
-      const byDate = new Map(); // date -> {coupang, naver}
-      for (const row of state.rows) {
-        const d = row.__date;
-        if (!d) continue;
-        const n = parseNumberLoose(row[metric]);
-        if (!Number.isFinite(n)) continue;
-        if (!byDate.has(d)) byDate.set(d, { coupang: 0, naver: 0 });
-        byDate.get(d)[row.__platform] += n;
-      }
-      const dates = [...byDate.keys()].sort();
-
-      const wrap = document.createElement("div");
-      wrap.style.marginBottom = "18px";
-      const title = document.createElement("div");
-      title.style.fontSize = "12.5px";
-      title.style.color = "var(--text-secondary)";
-      title.style.marginBottom = "6px";
-      title.textContent = metric;
-      wrap.appendChild(title);
-      const chartWrap = document.createElement("div");
-      chartWrap.className = "chart-wrap";
-      const canvas = document.createElement("canvas");
-      chartWrap.appendChild(canvas);
-      wrap.appendChild(chartWrap);
-      area.appendChild(wrap);
-
-      if (dates.length === 0) {
-        chartWrap.innerHTML = `<div class="empty-state">날짜를 인식하지 못했습니다. 위 "날짜로 쓸 컬럼"에서 다른 컬럼을 선택해 보세요.</div>`;
-        continue;
-      }
-
-      const platformsPresent = platformsInRows();
-      const colorFor = { coupang: cssVar("--series-1"), naver: cssVar("--series-2") };
-      const datasets = platformsPresent.map((p) => ({
-        label: PLATFORM_LABEL[p],
-        data: dates.map((d) => byDate.get(d)[p]),
-        borderColor: colorFor[p],
-        backgroundColor: colorFor[p],
-        borderWidth: 2,
-        pointRadius: 2,
-        pointHoverRadius: 5,
-        tension: 0.15,
-      }));
-
-      const chart = new Chart(canvas.getContext("2d"), {
-        type: "line",
-        data: { labels: dates, datasets },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          interaction: { mode: "index", intersect: false },
-          plugins: {
-            legend: { display: datasets.length > 1, labels: { color: cssVar("--text-secondary") } },
-            tooltip: { mode: "index", intersect: false },
-          },
-          scales: {
-            x: {
-              grid: { color: cssVar("--gridline") },
-              ticks: { color: cssVar("--text-muted") },
-            },
-            y: {
-              beginAtZero: true,
-              grid: { color: cssVar("--gridline") },
-              ticks: { color: cssVar("--text-muted") },
-            },
-          },
-        },
-      });
-      charts.push(chart);
-    }
+  function columnLabel(col) {
+    if (col === "date") return "날짜";
+    if (col === "campaign") return "캠페인명";
+    if (col === "group") return "그룹명";
+    return METRIC_BY_KEY[col]?.label ?? col;
   }
 
   function getFilteredSortedRows() {
-    let rows = state.rows;
+    let rows = state.aggregatedRows;
     if (state.search) {
-      rows = rows.filter((row) =>
-        Object.values(row).some((v) => String(v ?? "").toLowerCase().includes(state.search))
-      );
+      const q = state.search;
+      rows = rows.filter((r) => `${r.date} ${r.campaign} ${r.group}`.toLowerCase().includes(q));
     }
     if (state.sortColumn) {
       const col = state.sortColumn;
       rows = [...rows].sort((a, b) => {
         const av = a[col];
         const bv = b[col];
-        const an = parseNumberLoose(av);
-        const bn = parseNumberLoose(bv);
         let cmp;
-        if (!Number.isNaN(an) && !Number.isNaN(bn)) cmp = an - bn;
-        else cmp = String(av ?? "").localeCompare(String(bv ?? ""), "ko");
+        if (typeof av === "number" || typeof bv === "number") {
+          const an = Number.isFinite(av) ? av : -Infinity;
+          const bn = Number.isFinite(bv) ? bv : -Infinity;
+          cmp = an - bn;
+        } else {
+          cmp = String(av ?? "").localeCompare(String(bv ?? ""), "ko");
+        }
         return cmp * state.sortDir;
       });
     }
@@ -508,19 +463,19 @@
   }
 
   function renderTable() {
-    const hasData = state.rows.length > 0;
+    const hasData = state.aggregatedRows.length > 0;
     el("tableCard").style.display = hasData ? "" : "none";
     if (!hasData) return;
 
     const rows = getFilteredSortedRows();
-    const displayCols = ["__platform", "__file", ...state.columns];
+    const cols = visibleColumns();
 
     const head = el("tableHead");
     head.innerHTML = "";
     const tr = document.createElement("tr");
-    for (const col of displayCols) {
+    for (const col of cols) {
       const th = document.createElement("th");
-      th.textContent = col === "__platform" ? "플랫폼" : col === "__file" ? "파일" : col;
+      th.textContent = columnLabel(col);
       if (col === state.sortColumn) th.classList.add("sorted");
       th.addEventListener("click", () => {
         if (state.sortColumn === col) state.sortDir *= -1;
@@ -542,14 +497,12 @@
     body.innerHTML = "";
     for (const row of pageRows) {
       const tr2 = document.createElement("tr");
-      for (const col of displayCols) {
+      for (const col of cols) {
         const td = document.createElement("td");
-        if (col === "__platform") {
-          td.innerHTML = `<span class="platform-badge ${row.__platform}">${PLATFORM_LABEL[row.__platform] || row.__platform}</span>`;
-        } else if (col === "__file") {
-          td.textContent = row.__file;
-        } else {
+        if (col === "date" || col === "campaign" || col === "group") {
           td.textContent = row[col] ?? "";
+        } else {
+          td.textContent = formatMetric(row[col], METRIC_BY_KEY[col].format);
         }
         tr2.appendChild(td);
       }
@@ -561,17 +514,32 @@
     el("nextPageBtn").disabled = state.page >= totalPages;
   }
 
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      '"': "&quot;",
-      "'": "&#39;",
-    }[c]));
+  // ---------- 이벤트 ----------
+
+  for (const btn of document.querySelectorAll(".tab-btn")) {
+    btn.addEventListener("click", () => {
+      state.activePlatform = btn.dataset.platform;
+      state.page = 1;
+      state.sortColumn = null;
+      renderAll();
+    });
   }
 
-  // ---------- 이벤트 ----------
+  el("selectAllMetricsBtn").addEventListener("click", () => {
+    for (const metric of METRIC_COLUMNS) {
+      if (isMetricAvailable(state.activePlatform, metric.key)) state.visibleMetrics.add(metric.key);
+    }
+    renderColumnControls();
+    renderSummary();
+    renderTable();
+  });
+
+  el("clearMetricsBtn").addEventListener("click", () => {
+    state.visibleMetrics.clear();
+    renderColumnControls();
+    renderSummary();
+    renderTable();
+  });
 
   el("prevPageBtn").addEventListener("click", () => {
     state.page = Math.max(1, state.page - 1);
@@ -584,9 +552,12 @@
 
   function buildDownloadRows() {
     const rows = getFilteredSortedRows();
+    const cols = visibleColumns();
     return rows.map((row) => {
-      const out = { 플랫폼: PLATFORM_LABEL[row.__platform] || row.__platform, 파일: row.__file };
-      for (const col of state.columns) out[col] = row[col] ?? "";
+      const out = {};
+      for (const col of cols) {
+        out[columnLabel(col)] = col === "date" || col === "campaign" || col === "group" ? row[col] ?? "" : row[col];
+      }
       return out;
     });
   }
@@ -605,14 +576,14 @@
   el("downloadFilteredBtn").addEventListener("click", () => {
     const csv = Papa.unparse(buildDownloadRows());
     const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-    triggerBlobDownload(blob, `ad_report_${new Date().toISOString().slice(0, 10)}.csv`);
+    triggerBlobDownload(blob, `${state.activePlatform}_report_${new Date().toISOString().slice(0, 10)}.csv`);
   });
 
   el("downloadFilteredXlsxBtn").addEventListener("click", () => {
     const worksheet = XLSX.utils.json_to_sheet(buildDownloadRows());
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "리포트");
-    XLSX.writeFile(workbook, `ad_report_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.utils.book_append_sheet(workbook, worksheet, PLATFORM_LABEL[state.activePlatform]);
+    XLSX.writeFile(workbook, `${state.activePlatform}_report_${new Date().toISOString().slice(0, 10)}.xlsx`);
   });
 
   const themeToggle = el("themeToggle");
@@ -633,7 +604,6 @@
     } catch (e) {
       /* 저장 실패해도 화면 전환 자체는 계속 동작 */
     }
-    renderCharts();
   });
   applyStoredTheme();
 
