@@ -11,8 +11,8 @@
     selectedPaths: new Set(),
     rows: [],
     columns: [],
-    colsByPlatform: { coupang: new Set(), naver: new Set() },
-    dateColumnByPlatform: {}, // 플랫폼별 자동 감지된 날짜 컬럼명
+    colsByFile: new Map(), // filePath -> Set(컬럼명) — 같은 플랫폼이어도 광고상품별로 raw 컬럼 구성이 다를 수 있어 파일 단위로 관리
+    dateColumnByFile: new Map(), // filePath -> 자동 감지된 날짜 컬럼명
     manualDateColumn: null, // 사용자가 직접 고른 날짜 컬럼명 (null이면 자동 감지 사용)
     metricColumns: new Set(),
     numericColumns: [],
@@ -26,18 +26,23 @@
     return PLATFORMS.filter((p) => state.rows.some((r) => r.__platform === p));
   }
 
-  // 플랫폼마다 컬럼명이 다를 수 있어(예: 쿠팡 "날짜" vs 네이버 "일자"),
-  // 이 플랫폼에 실제로 존재하는 컬럼 중에서 날짜 컬럼을 찾는다.
-  function resolveDateColumn(platform) {
-    if (state.manualDateColumn && state.colsByPlatform[platform]?.has(state.manualDateColumn)) {
+  function filesInRows() {
+    return [...new Set(state.rows.map((r) => r.__filePath))];
+  }
+
+  // 같은 플랫폼이라도 광고상품(리포트 종류)마다 컬럼 구성이 다를 수 있어
+  // (예: 쿠팡 "날짜" vs 네이버 "일자", 혹은 같은 쿠팡이라도 상품별로 컬럼이 다름),
+  // 파일 단위로 실제 존재하는 컬럼 중에서만 날짜 컬럼을 찾는다.
+  function resolveDateColumn(filePath) {
+    if (state.manualDateColumn && state.colsByFile.get(filePath)?.has(state.manualDateColumn)) {
       return state.manualDateColumn;
     }
-    return state.dateColumnByPlatform[platform] || null;
+    return state.dateColumnByFile.get(filePath) || null;
   }
 
   function applyDates() {
     for (const row of state.rows) {
-      const col = resolveDateColumn(row.__platform);
+      const col = resolveDateColumn(row.__filePath);
       row.__date = col ? parseDateLoose(row[col]) : null;
     }
   }
@@ -46,11 +51,13 @@
 
   // ---------- 인코딩/파싱 유틸 ----------
 
-  async function fetchCsvText(url) {
-    const buf = await fetch(url).then((r) => {
-      if (!r.ok) throw new Error(`${url} 요청 실패 (${r.status})`);
-      return r.arrayBuffer();
-    });
+  async function fetchArrayBuffer(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${url} 요청 실패 (${res.status})`);
+    return res.arrayBuffer();
+  }
+
+  function decodeCsvBuffer(buf) {
     // 쿠팡/네이버 raw csv는 UTF-8이 아닌 EUC-KR(CP949)로 내려받아지는 경우가 많다.
     // UTF-8로 먼저 시도하고, 깨지면(fatal) EUC-KR로 다시 디코딩한다.
     try {
@@ -58,6 +65,28 @@
     } catch (e) {
       return new TextDecoder("euc-kr").decode(buf);
     }
+  }
+
+  function trimKeys(row) {
+    const out = {};
+    for (const k of Object.keys(row)) out[k.trim()] = row[k];
+    return out;
+  }
+
+  // csv/xlsx 파일 하나를 읽어서 {header: value} 형태의 행 배열로 반환한다.
+  async function parseDataFile(path) {
+    const buf = await fetchArrayBuffer(path);
+    if (/\.xlsx?$/i.test(path)) {
+      // 엑셀은 날짜 셀이 숫자(일련번호)로 저장되므로 cellDates로 JS Date로 바꾸고,
+      // sheet_to_json에서 raw:false + dateNF로 화면에 보이는 형태의 문자열로 뽑는다.
+      const workbook = XLSX.read(new Uint8Array(buf), { type: "array", cellDates: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { raw: false, dateNF: "yyyy-mm-dd", defval: "" });
+      return rows.map(trimKeys);
+    }
+    const text = decodeCsvBuffer(buf).replace(/^﻿/, "");
+    const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+    return parsed.data.map(trimKeys);
   }
 
   function parseNumberLoose(v) {
@@ -114,13 +143,9 @@
     const allRows = [];
     for (const f of files) {
       try {
-        const text = await fetchCsvText(f.path);
-        const parsed = Papa.parse(text.replace(/^﻿/, ""), {
-          header: true,
-          skipEmptyLines: true,
-        });
-        for (const row of parsed.data) {
-          allRows.push({ __platform: f.platform, __file: f.name, ...row });
+        const rows = await parseDataFile(f.path);
+        for (const row of rows) {
+          allRows.push({ __platform: f.platform, __file: f.name, __filePath: f.path, ...row });
         }
       } catch (e) {
         console.error("파일을 불러오지 못했습니다:", f.path, e);
@@ -134,20 +159,22 @@
 
   function computeColumns() {
     const cols = new Set();
-    const colsByPlatform = { coupang: new Set(), naver: new Set() };
+    const colsByFile = new Map();
     for (const row of state.rows) {
+      if (!colsByFile.has(row.__filePath)) colsByFile.set(row.__filePath, new Set());
+      const fileCols = colsByFile.get(row.__filePath);
       for (const k of Object.keys(row)) {
-        if (k === "__platform" || k === "__file" || k === "__date") continue;
+        if (k === "__platform" || k === "__file" || k === "__filePath" || k === "__date") continue;
         cols.add(k);
-        if (colsByPlatform[row.__platform]) colsByPlatform[row.__platform].add(k);
+        fileCols.add(k);
       }
     }
     state.columns = [...cols];
-    state.colsByPlatform = colsByPlatform;
+    state.colsByFile = colsByFile;
 
-    state.dateColumnByPlatform = {};
-    for (const p of platformsInRows()) {
-      state.dateColumnByPlatform[p] = detectDateColumnForPlatform(p);
+    state.dateColumnByFile = new Map();
+    for (const filePath of filesInRows()) {
+      state.dateColumnByFile.set(filePath, detectDateColumnForFile(filePath));
     }
     applyDates();
 
@@ -167,12 +194,12 @@
     }
   }
 
-  // platform에 실제로 존재하는 컬럼들 중에서만 날짜 컬럼 후보를 찾는다.
-  function detectDateColumnForPlatform(platform) {
+  // 해당 파일에 실제로 존재하는 컬럼들 중에서만 날짜 컬럼 후보를 찾는다.
+  function detectDateColumnForFile(filePath) {
     let best = null;
     let bestScore = 0;
-    const rows = state.rows.filter((r) => r.__platform === platform);
-    for (const col of state.colsByPlatform[platform]) {
+    const rows = state.rows.filter((r) => r.__filePath === filePath);
+    for (const col of state.colsByFile.get(filePath)) {
       let hit = 0;
       let total = 0;
       for (const row of rows) {
@@ -193,7 +220,7 @@
   }
 
   function detectNumericColumns() {
-    const dateCols = new Set(Object.values(state.dateColumnByPlatform).filter(Boolean));
+    const dateCols = new Set([...state.dateColumnByFile.values()].filter(Boolean));
     const result = [];
     for (const col of state.columns) {
       if (dateCols.has(col)) continue;
@@ -325,16 +352,21 @@
     };
   }
 
-  // 플랫폼마다 컬럼명이 달라서(예: 쿠팡 "날짜" / 네이버 "일자") 실제로 어떤
-  // 컬럼이 날짜로 쓰이고 있는지 보여준다.
+  // 같은 플랫폼이라도 광고상품(리포트 종류)마다 컬럼명이 달라질 수 있어서
+  // (예: 쿠팡 "날짜" / 네이버 "일자", 혹은 같은 쿠팡이라도 상품별로 다름),
+  // 파일별로 실제로 어떤 컬럼이 날짜로 쓰이고 있는지 보여준다.
   function renderDateHint() {
     const hint = el("dateColumnHint");
     if (!hint) return;
-    const parts = platformsInRows().map((p) => {
-      const col = resolveDateColumn(p);
-      return `${PLATFORM_LABEL[p]} → ${col ? col : "인식 실패"}`;
+    const files = state.manifest.files.filter((f) => state.selectedPaths.has(f.path));
+    const parts = files.map((f) => {
+      const col = resolveDateColumn(f.path);
+      return `${f.name} → ${col ? col : "인식 실패"}`;
     });
-    hint.textContent = parts.length ? `현재 매칭: ${parts.join(" · ")}` : "";
+    const MAX_SHOWN = 4;
+    const shown = parts.slice(0, MAX_SHOWN).join(" · ");
+    const extra = parts.length > MAX_SHOWN ? ` 외 ${parts.length - MAX_SHOWN}개` : "";
+    hint.textContent = parts.length ? `현재 매칭: ${shown}${extra}` : "";
   }
 
   function renderSummary() {
@@ -368,7 +400,7 @@
   let charts = [];
 
   function renderCharts() {
-    const hasAnyDate = platformsInRows().some((p) => resolveDateColumn(p));
+    const hasAnyDate = filesInRows().some((fp) => resolveDateColumn(fp));
     const hasChart = state.rows.length > 0 && state.metricColumns.size > 0 && hasAnyDate;
     el("chartCard").style.display = hasChart ? "" : "none";
     for (const c of charts) c.destroy();

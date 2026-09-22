@@ -1,6 +1,6 @@
 name: Update data manifest
 
-# data/coupang 또는 data/naver 에 csv 파일이 새로 올라오면
+# data/coupang 또는 data/naver 에 csv/xlsx 파일이 새로 올라오면
 # scripts/build_manifest.py 를 실행해서 data/manifest.json 을 자동으로 갱신하고,
 # 바뀐 내용이 있으면 자동으로 커밋/푸시한다.
 # 리포트 웹페이지(index.html)는 이 manifest.json 을 읽어서 어떤 파일이 있는지 안다.
@@ -10,7 +10,11 @@ on:
     branches: [main]
     paths:
       - "data/coupang/**.csv"
+      - "data/coupang/**.xlsx"
+      - "data/coupang/**.xls"
       - "data/naver/**.csv"
+      - "data/naver/**.xlsx"
+      - "data/naver/**.xls"
   workflow_dispatch:
 
 permissions:
