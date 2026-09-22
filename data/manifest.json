@@ -13,6 +13,12 @@
       "size": 104467
     },
     {
+      "platform": "coupang",
+      "name": "쿠팡_PA_A00534677_pa_daily_keyword_20260914_20260920.xlsx",
+      "path": "data/coupang/쿠팡_PA_A00534677_pa_daily_keyword_20260914_20260920.xlsx",
+      "size": 2141630
+    },
+    {
       "platform": "naver",
       "name": "NAVER_쇼핑검색광고(카탈로그)_20260914~20260916.csv",
       "path": "data/naver/NAVER_쇼핑검색광고(카탈로그)_20260914~20260916.csv",
