@@ -20,6 +20,12 @@
     },
     {
       "platform": "naver",
+      "name": "NAVER_쇼핑검색광고(카탈로그)_20260914~20260916.csv",
+      "path": "data/naver/NAVER_쇼핑검색광고(카탈로그)_20260914~20260916.csv",
+      "size": 62259
+    },
+    {
+      "platform": "naver",
       "name": "NAVER_애드부스트_20260915~20260921.csv",
       "path": "data/naver/NAVER_애드부스트_20260915~20260921.csv",
       "size": 5860
