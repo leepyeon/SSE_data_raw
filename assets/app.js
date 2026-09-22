@@ -119,6 +119,11 @@
     colsByFile: new Map(), // filePath -> Set(원본 컬럼명)
     activePlatform: "coupang",
     table1Page: 1,
+    // 슬라이서 선택 상태 - 플랫폼(탭)마다 따로 기억한다(탭을 바꿔도 유지됨).
+    filters: {
+      coupang: { years: new Set(), months: new Set(), productTypes: new Set() },
+      naver: { years: new Set(), months: new Set(), productTypes: new Set() },
+    },
   };
 
   const el = (id) => document.getElementById(id);
@@ -241,6 +246,48 @@
     sunday.setUTCDate(monday.getUTCDate() + 6);
     const fmt = (x) => `${String(x.getUTCMonth() + 1).padStart(2, "0")}.${String(x.getUTCDate()).padStart(2, "0")}`;
     return { key: formatDateUTC(monday), label: `${fmt(monday)}~${fmt(sunday)}` };
+  }
+
+  function yearOf(dateStr) {
+    return dateStr.slice(0, 4);
+  }
+
+  function monthOf(dateStr) {
+    return dateStr.slice(5, 7);
+  }
+
+  // 년도/월/광고상품유형 슬라이서 선택 상태에 이 행(날짜+상품구분)이 걸리는지.
+  // 어떤 슬라이서도 선택 안 했으면(빈 Set) 그 기준은 통과시킨다(=전체 보기).
+  function passesFilters(platform, date, productType) {
+    const f = state.filters[platform];
+    if (f.years.size && !f.years.has(yearOf(date))) return false;
+    if (f.months.size && !f.months.has(monthOf(date))) return false;
+    if (f.productTypes.size && !f.productTypes.has(productType)) return false;
+    return true;
+  }
+
+  // 현재 플랫폼에 실제로 존재하는 년도/월/상품구분 목록 (슬라이서 버튼 목록用).
+  // 지금 선택된 필터와 무관하게 전체 목록을 보여준다.
+  function computeFilterOptions(platform) {
+    const years = new Set();
+    const months = new Set();
+    const productTypes = new Set();
+    for (const row of state.rows) {
+      if (row.__platform !== platform) continue;
+      const fp = row.__filePath;
+      const dateCol = resolveField(fp, platform, "date");
+      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      if (date) {
+        years.add(yearOf(date));
+        months.add(monthOf(date));
+      }
+      productTypes.add(row.__productType);
+    }
+    return {
+      years: [...years].sort(),
+      months: [...months].sort(),
+      productTypes: [...productTypes].sort(),
+    };
   }
 
   function formatMetric(value, format) {
@@ -397,7 +444,8 @@
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
       const dateCol = resolveField(fp, platform, "date");
-      if (!dateCol || !parseDateLoose(row[dateCol])) continue;
+      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      if (!date || !passesFilters(platform, date, row.__productType)) continue;
       const campaignCol = resolveField(fp, platform, "campaign");
       const groupCol = resolveField(fp, platform, "group");
       const campaign = campaignCol ? row[campaignCol] ?? "" : "";
@@ -418,8 +466,9 @@
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
       const dateCol = resolveField(fp, platform, "date");
-      if (!dateCol || !parseDateLoose(row[dateCol])) continue;
+      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
       const productType = row.__productType;
+      if (!date || !passesFilters(platform, date, productType)) continue;
       accumulateRow(groups, productType, { productType }, row, fp, platform);
     }
     return finalizeGroups(groups).sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
@@ -433,9 +482,9 @@
       const fp = row.__filePath;
       const dateCol = resolveField(fp, platform, "date");
       const date = dateCol ? parseDateLoose(row[dateCol]) : null;
-      if (!date) continue;
-      const week = weekOf(date);
       const productType = row.__productType;
+      if (!date || !passesFilters(platform, date, productType)) continue;
+      const week = weekOf(date);
       const key = `${week.key}\u0001${productType}`;
       accumulateRow(groups, key, { weekKey: week.key, weekLabel: week.label, productType }, row, fp, platform);
     }
@@ -449,8 +498,9 @@
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
       const dateCol = resolveField(fp, platform, "date");
-      if (!dateCol || !parseDateLoose(row[dateCol])) continue;
+      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
       const productType = row.__productType;
+      if (!date || !passesFilters(platform, date, productType)) continue;
       const campaignCol = resolveField(fp, platform, "campaign");
       const groupCol = resolveField(fp, platform, "group");
       const campaign = campaignCol ? row[campaignCol] ?? "" : "";
@@ -471,6 +521,7 @@
     renderTabs();
     renderFileNotice();
     renderRawDownload();
+    renderSlicers();
     renderTable1();
     renderTable2();
     renderTable3();
@@ -481,6 +532,37 @@
     for (const btn of document.querySelectorAll(".tab-btn")) {
       btn.classList.toggle("active", btn.dataset.platform === state.activePlatform);
     }
+  }
+
+  function renderSlicerGroup(containerId, values, selectedSet, formatLabel) {
+    const area = el(containerId);
+    area.innerHTML = "";
+    if (values.length === 0) {
+      area.innerHTML = `<span class="empty-state">-</span>`;
+      return;
+    }
+    for (const v of values) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "slicer-btn" + (selectedSet.has(v) ? " active" : "");
+      btn.textContent = formatLabel ? formatLabel(v) : v;
+      btn.addEventListener("click", () => {
+        if (selectedSet.has(v)) selectedSet.delete(v);
+        else selectedSet.add(v);
+        state.table1Page = 1;
+        renderAll();
+      });
+      area.appendChild(btn);
+    }
+  }
+
+  function renderSlicers() {
+    const platform = state.activePlatform;
+    const options = computeFilterOptions(platform);
+    const f = state.filters[platform];
+    renderSlicerGroup("yearSlicer", options.years, f.years, (y) => `${y}년`);
+    renderSlicerGroup("monthSlicer", options.months, f.months, (m) => `${Number(m)}월`);
+    renderSlicerGroup("productTypeSlicer", options.productTypes, f.productTypes);
   }
 
   function formatSize(bytes) {

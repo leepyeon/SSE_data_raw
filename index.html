@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>쿠팡 · 네이버 광고 리포트</title>
-<link rel="stylesheet" href="assets/style.css?v=5" />
+<link rel="stylesheet" href="assets/style.css?v=6" />
 </head>
 <body>
 <div class="page">
@@ -31,6 +31,24 @@
 
   <div class="toolbar-actions" style="margin: 0 0 20px;">
     <button class="primary" id="downloadScreenXlsxBtn" type="button">이 화면을 엑셀 파일로 다운받기</button>
+  </div>
+
+  <div class="card" id="slicerCard">
+    <h2>필터</h2>
+    <div class="filter-row">
+      <div class="filter-group">
+        <span class="label">년도</span>
+        <div class="chip-list" id="yearSlicer"></div>
+      </div>
+      <div class="filter-group">
+        <span class="label">월</span>
+        <div class="chip-list" id="monthSlicer"></div>
+      </div>
+      <div class="filter-group">
+        <span class="label">광고상품유형</span>
+        <div class="chip-list" id="productTypeSlicer"></div>
+      </div>
+    </div>
   </div>
 
   <div class="card" id="table1Card">
@@ -91,6 +109,6 @@
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <!-- app.js를 바꿀 때마다 아래 v= 숫자를 올려서, 예전 파일이 브라우저에 캐시되어 남아있는 문제를 방지합니다. -->
-<script src="assets/app.js?v=7"></script>
+<script src="assets/app.js?v=8"></script>
 </body>
 </html>
