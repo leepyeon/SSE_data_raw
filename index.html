@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>쿠팡 · 네이버 광고 리포트</title>
+<link rel="stylesheet" href="assets/style.css" />
+</head>
+<body>
+<div class="page">
+
+  <div class="topbar">
+    <div>
+      <h1>쿠팡 · 네이버 광고 리포트</h1>
+      <div class="subtitle">data/coupang, data/naver 폴더에 올라온 raw csv를 자동으로 읽어서 보여줍니다.</div>
+    </div>
+    <button class="theme-toggle" id="themeToggle" type="button">화면 모드 전환</button>
+  </div>
+
+  <div class="card">
+    <h2>파일 선택</h2>
+    <div id="fileListArea" class="file-list">
+      <div class="empty-state">불러오는 중...</div>
+    </div>
+  </div>
+
+  <div class="card" id="columnCard" style="display:none;">
+    <h2>표시 옵션</h2>
+    <div class="filter-row">
+      <div class="filter-group">
+        <span class="label">날짜로 쓸 컬럼</span>
+        <select id="dateColumnSelect"></select>
+        <span class="label" id="dateColumnHint"></span>
+      </div>
+      <div class="filter-group">
+        <span class="label">그래프로 볼 지표 (숫자 컬럼)</span>
+        <div class="chip-list" id="metricChipList"></div>
+      </div>
+      <div class="filter-group">
+        <span class="label">검색 (표 안 내용)</span>
+        <input type="text" id="searchInput" placeholder="예: 캠페인명 일부" />
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="summaryCard" style="display:none;">
+    <h2>요약</h2>
+    <div class="stat-grid" id="statGrid"></div>
+  </div>
+
+  <div class="card" id="chartCard" style="display:none;">
+    <h2 id="chartTitle">추이</h2>
+    <div id="chartsArea"></div>
+  </div>
+
+  <div class="card" id="tableCard" style="display:none;">
+    <div class="toolbar">
+      <h2 style="margin:0;">원본 데이터</h2>
+      <button class="primary" id="downloadFilteredBtn" type="button">현재 조건으로 CSV 다운로드</button>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead id="tableHead"></thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+    <div class="pagination">
+      <span id="pageInfo"></span>
+      <button id="prevPageBtn" type="button">이전</button>
+      <button id="nextPageBtn" type="button">다음</button>
+    </div>
+  </div>
+
+  <footer>raw 파일은 위 파일 목록의 "원본 다운로드" 링크에서 그대로 받을 수 있습니다.</footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

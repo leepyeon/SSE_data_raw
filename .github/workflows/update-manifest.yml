@@ -1,0 +1,46 @@
+name: Update data manifest
+
+# data/coupang 또는 data/naver 에 csv 파일이 새로 올라오면
+# scripts/build_manifest.py 를 실행해서 data/manifest.json 을 자동으로 갱신하고,
+# 바뀐 내용이 있으면 자동으로 커밋/푸시한다.
+# 리포트 웹페이지(index.html)는 이 manifest.json 을 읽어서 어떤 파일이 있는지 안다.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "data/coupang/**.csv"
+      - "data/naver/**.csv"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-manifest
+  cancel-in-progress: false
+
+jobs:
+  build-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Build manifest
+        run: python3 scripts/build_manifest.py
+
+      - name: Commit manifest if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- data/manifest.json; then
+            echo "manifest.json 변경 없음"
+          else
+            git add data/manifest.json
+            git commit -m "chore: update data manifest"
+            git push
+          fi
