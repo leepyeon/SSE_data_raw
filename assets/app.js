@@ -5,43 +5,56 @@
   const PLATFORMS = ["coupang", "naver"];
   const PAGE_SIZE = 50;
 
-  // 실제 raw 컬럼명이 플랫폼마다 다르므로, 리포트 필드 <-> raw 컬럼명 매핑표.
-  // null이면 아래 FIELD_AUTO_PATTERNS로 자동 추정하고, NOT_MAPPED이면 추정도 하지 않고 "-"로 비워둔다.
+  // 실제 raw 컬럼명이 플랫폼/광고상품마다 다르므로, 리포트 필드 <-> raw 컬럼명 매핑표.
+  // 값은 문자열 하나 또는 후보 문자열 배열(여러 광고상품이 서로 다른 이름을 쓸 때
+  // 앞에서부터 순서대로 시도). null이면 아래 FIELD_AUTO_PATTERNS로 자동 추정하고,
+  // NOT_MAPPED이면 추정도 하지 않고 "-"로 비워둔다.
+  //
+  // 쿠팡: PA(키워드), BPA(브랜드 광고그룹), NCA(성과형) raw 샘플을 직접 확인해서 채움.
+  //   같은 개념이라도 상품별로 "광고비" / "집행 광고비" / "광고비(원)"처럼 표기가 다르고,
+  //   NCA는 "총 전환 매출액 (1일)(원)"처럼 띄어쓰기와 단위가 더 붙는 식이라
+  //   resolveField에서 공백을 지우고 한 번 더 비교(접두 일치)한다.
+  // 네이버: 쇼핑검색광고(카탈로그)/애드부스트/카탈로그 raw 샘플을 직접 확인해서 채움.
+  //   쇼핑검색광고(카탈로그)는 전환/매출 컬럼 자체가 없는 리포트라 그 파일에서는
+  //   전환수/전환매출이 자동으로 "-"가 된다(정상 동작).
   const NOT_MAPPED = Symbol("not-mapped");
   const FIELD_MAP = {
     coupang: {
       date: "날짜",
-      campaign: "캠페인명",
+      campaign: ["캠페인명", "캠페인 이름"],
       group: "광고그룹",
-      cost: "광고비",
+      cost: ["광고비", "집행 광고비", "광고비(원)"],
       impressions: "노출수",
       clicks: "클릭수",
       conversions: "직접 판매수량(1일)",
       revenue: "직접 전환매출액(1일)",
     },
     naver: {
-      date: null,
-      campaign: null,
-      group: null,
-      cost: null,
-      impressions: null,
-      clicks: null,
-      // 네이버 raw 샘플을 아직 못 봐서 전환수/전환매출 컬럼명을 확정하지 못했다.
-      // 실제 파일을 받으면 위 coupang처럼 정확한 컬럼명으로 채워 넣으면 된다.
-      conversions: NOT_MAPPED,
-      revenue: NOT_MAPPED,
+      date: ["기간", "일별"],
+      campaign: ["캠페인 이름", "캠페인"],
+      group: ["광고 그룹 이름", "광고그룹", "상품명"],
+      cost: "총비용",
+      impressions: "노출수",
+      clicks: "클릭수",
+      conversions: "구매완료 수",
+      revenue: "구매완료 전환매출액",
     },
   };
 
-  // 명시적 매핑이 없을 때(null) 컬럼명을 추정하는 패턴. "클릭률"이 "클릭수"로 오인되지 않도록 주의.
+  // 명시적 매핑이 하나도 안 맞을 때(새로운 광고상품 등) 컬럼명을 추정하는 패턴.
+  // "클릭률"이 "클릭수"로, "캠페인 ID"가 캠페인명으로 오인되지 않도록 주의해서 만듦.
   const FIELD_AUTO_PATTERNS = {
-    date: /날짜|일자|date/i,
-    campaign: /^캠페인명$|^캠페인$/i,
-    group: /그룹명|광고그룹|^그룹$/i,
+    date: /^(날짜|일자|기간|일별)$/i,
+    campaign: /^캠페인(명|\s?이름)?$/i,
+    group: /그룹(명|\s?이름)?$/i,
     cost: /광고비|총비용|^비용$|spend|cost/i,
     impressions: /노출수|^노출$|impression/i,
-    clicks: /클릭수|^클릭$/i,
+    clicks: /^클릭수$|^클릭$/i,
   };
+
+  function normalizeColName(s) {
+    return s.replace(/\s+/g, "");
+  }
 
   const METRIC_COLUMNS = [
     { key: "cost", label: "광고비", deps: ["cost"], format: "money" },
@@ -149,9 +162,16 @@
 
   function parseDateLoose(v) {
     if (v == null) return null;
-    // cellDates가 못 알아본 엑셀 날짜 일련번호가 숫자 그대로 남아있는 경우
     if (typeof v === "number") {
-      return v > 20000 && v < 80000 ? excelSerialToDateStr(v) : null;
+      // 쿠팡 상품별로 날짜가 YYYYMMDD 형태의 숫자(예: 20260914)로 오거나,
+      // cellDates가 못 알아본 엑셀 날짜 일련번호(예: 46266)로 그대로 남기도 한다.
+      if (Number.isInteger(v) && v >= 19000101 && v <= 21001231) {
+        v = String(v);
+      } else if (v > 20000 && v < 80000) {
+        return excelSerialToDateStr(v);
+      } else {
+        return null;
+      }
     }
     let s = String(v).trim();
     if (!s) return null;
@@ -198,7 +218,20 @@
     if (!cols) return null;
     const mapped = FIELD_MAP[platform]?.[field];
     if (mapped === NOT_MAPPED) return null;
-    if (mapped) return cols.has(mapped) ? mapped : null;
+    if (mapped) {
+      const candidates = Array.isArray(mapped) ? mapped : [mapped];
+      // 1) 정확히 일치하는 컬럼명부터 시도
+      for (const c of candidates) if (cols.has(c)) return c;
+      // 2) 광고상품마다 붙는 공백/단위가 달라서("총 전환 매출액 (1일)(원)" 등)
+      //    공백을 지우고 다시 비교 (완전 일치 또는 접두 일치)
+      for (const col of cols) {
+        const normCol = normalizeColName(col);
+        for (const cand of candidates) {
+          const normCand = normalizeColName(cand);
+          if (normCol === normCand || normCol.startsWith(normCand)) return col;
+        }
+      }
+    }
     const pattern = FIELD_AUTO_PATTERNS[field];
     if (pattern) {
       for (const c of cols) if (pattern.test(c)) return c;
@@ -230,14 +263,34 @@
     await reloadSelectedData();
   }
 
+  // 파일명으로 광고상품 구분(쿠팡 PA/BPA/NCA, 네이버 쇼핑검색/애드부스트/카탈로그)을 추정한다.
+  // 서로 다른 상품인데 캠페인명/그룹명이 우연히 같아도 집계가 섞이지 않도록
+  // 이 값을 집계 키에 포함시킨다.
+  function detectProductType(platform, fileName) {
+    if (platform === "coupang") {
+      if (/BPA/i.test(fileName)) return "BPA";
+      if (/NCA/i.test(fileName)) return "NCA";
+      if (/PA/i.test(fileName)) return "PA";
+      return "기타";
+    }
+    if (platform === "naver") {
+      if (fileName.includes("쇼핑검색")) return "쇼핑검색광고(카탈로그)";
+      if (fileName.includes("애드부스트")) return "애드부스트";
+      if (fileName.includes("카탈로그")) return "카탈로그";
+      return "기타";
+    }
+    return "기타";
+  }
+
   async function reloadSelectedData() {
     const files = state.manifest.files.filter((f) => state.selectedPaths.has(f.path));
     const allRows = [];
     for (const f of files) {
       try {
         const rows = await parseDataFile(f.path);
+        const productType = detectProductType(f.platform, f.name);
         for (const row of rows) {
-          allRows.push({ __platform: f.platform, __file: f.name, __filePath: f.path, ...row });
+          allRows.push({ __platform: f.platform, __file: f.name, __filePath: f.path, __productType: productType, ...row });
         }
       } catch (e) {
         console.error("파일을 불러오지 못했습니다:", f.path, e);
@@ -279,10 +332,13 @@
       const groupCol = resolveField(fp, platform, "group");
       const campaign = campaignCol ? row[campaignCol] ?? "" : "";
       const group = groupCol ? row[groupCol] ?? "" : "";
+      const productType = row.__productType;
 
-      const key = `${date}\u0001${campaign}\u0001${group}`;
+      // 상품구분(PA/BPA/NCA, 쇼핑검색/애드부스트/카탈로그 등)을 키에 포함시켜서,
+      // 서로 다른 상품인데 캠페인명/그룹명이 우연히 같아도 집계가 섞이지 않게 한다.
+      const key = `${date}\u0001${productType}\u0001${campaign}\u0001${group}`;
       if (!groups.has(key)) {
-        groups.set(key, { date, campaign, group, cost: 0, impressions: 0, clicks: 0, conversions: 0, revenue: 0 });
+        groups.set(key, { date, productType, campaign, group, cost: 0, impressions: 0, clicks: 0, conversions: 0, revenue: 0 });
       }
       const g = groups.get(key);
 
@@ -462,11 +518,12 @@
   }
 
   function visibleColumns() {
-    return ["date", "campaign", "group", ...METRIC_COLUMNS.filter((m) => state.visibleMetrics.has(m.key)).map((m) => m.key)];
+    return ["date", "productType", "campaign", "group", ...METRIC_COLUMNS.filter((m) => state.visibleMetrics.has(m.key)).map((m) => m.key)];
   }
 
   function columnLabel(col) {
     if (col === "date") return "날짜";
+    if (col === "productType") return "상품구분";
     if (col === "campaign") return "캠페인명";
     if (col === "group") return "그룹명";
     return METRIC_BY_KEY[col]?.label ?? col;
@@ -476,7 +533,7 @@
     let rows = state.aggregatedRows;
     if (state.search) {
       const q = state.search;
-      rows = rows.filter((r) => `${r.date} ${r.campaign} ${r.group}`.toLowerCase().includes(q));
+      rows = rows.filter((r) => `${r.date} ${r.productType} ${r.campaign} ${r.group}`.toLowerCase().includes(q));
     }
     if (state.sortColumn) {
       const col = state.sortColumn;
@@ -534,7 +591,7 @@
       const tr2 = document.createElement("tr");
       for (const col of cols) {
         const td = document.createElement("td");
-        if (col === "date" || col === "campaign" || col === "group") {
+        if (col === "date" || col === "productType" || col === "campaign" || col === "group") {
           td.textContent = row[col] ?? "";
         } else {
           td.textContent = formatMetric(row[col], METRIC_BY_KEY[col].format);
@@ -591,7 +648,7 @@
     return rows.map((row) => {
       const out = {};
       for (const col of cols) {
-        out[columnLabel(col)] = col === "date" || col === "campaign" || col === "group" ? row[col] ?? "" : row[col];
+        out[columnLabel(col)] = col === "date" || col === "productType" || col === "campaign" || col === "group" ? row[col] ?? "" : row[col];
       }
       return out;
     });
