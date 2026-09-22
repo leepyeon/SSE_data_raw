@@ -2,12 +2,6 @@
   "files": [
     {
       "platform": "coupang",
-      "name": "쿠팡_A00534677_pa_daily_keyword_20260914_20260920.xlsx",
-      "path": "data/coupang/쿠팡_A00534677_pa_daily_keyword_20260914_20260920.xlsx",
-      "size": 2600111
-    },
-    {
-      "platform": "coupang",
       "name": "쿠팡_BPA_A00111021_ba_daily_adGroup_20260914_20260920.xlsx",
       "path": "data/coupang/쿠팡_BPA_A00111021_ba_daily_adGroup_20260914_20260920.xlsx",
       "size": 22172
