@@ -5,6 +5,18 @@
       "name": "TEST.xlsx",
       "path": "data/coupang/TEST.xlsx",
       "size": 283989
+    },
+    {
+      "platform": "naver",
+      "name": "NAVER_애드부스트_20260915~20260921.csv",
+      "path": "data/naver/NAVER_애드부스트_20260915~20260921.csv",
+      "size": 5860
+    },
+    {
+      "platform": "naver",
+      "name": "NAVER_카탈로그_20260915-20260921.csv",
+      "path": "data/naver/NAVER_카탈로그_20260915-20260921.csv",
+      "size": 4676
     }
   ]
 }
