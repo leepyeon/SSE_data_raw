@@ -5,6 +5,12 @@
       "name": "TEST.xlsx",
       "path": "data/coupang/TEST.xlsx",
       "size": 283989
+    },
+    {
+      "platform": "naver",
+      "name": "advoost_20260915~20260921.csv",
+      "path": "data/naver/advoost_20260915~20260921.csv",
+      "size": 12800
     }
   ]
 }
