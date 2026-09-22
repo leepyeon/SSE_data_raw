@@ -101,20 +101,46 @@
   async function parseDataFile(path) {
     const buf = await fetchArrayBuffer(path);
     if (/\.xlsx?$/i.test(path)) {
-      // 엑셀은 날짜 셀이 숫자(일련번호)로 저장되므로 cellDates로 JS Date로 바꾸고,
-      // sheet_to_json에서 raw:false + dateNF로 화면에 보이는 형태의 문자열로 뽑는다.
+      // 엑셀은 날짜 셀이 내부적으로 숫자(일련번호, 예: 46266)로 저장된다.
+      // cellDates로 최대한 JS Date로 바꾸되, 셀 서식이 인식 안 되는 경우를 대비해
+      // raw:true로 원본 값(숫자 or Date)을 그대로 받아 parseDateLoose에서 이중으로 처리한다.
       const workbook = XLSX.read(new Uint8Array(buf), { type: "array", cellDates: true });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { raw: false, dateNF: "yyyy-mm-dd", defval: "" });
-      return rows.map(trimKeys);
+      const rows = XLSX.utils.sheet_to_json(sheet, { raw: true, defval: "" });
+      return rows.map((row) => trimKeys(normalizeXlsxRow(row)));
     }
     const text = decodeCsvBuffer(buf).replace(/^﻿/, "");
     const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
     return parsed.data.map(trimKeys);
   }
 
+  // sheet_to_json이 돌려준 JS Date 객체를 문자열로 바꿔서, 이후 파싱 로직이
+  // csv에서 온 문자열 값과 동일하게 다룰 수 있게 한다. 숫자/문자열은 그대로 둔다.
+  function normalizeXlsxRow(row) {
+    const out = {};
+    for (const k of Object.keys(row)) {
+      const v = row[k];
+      out[k] = v instanceof Date ? formatDateUTC(v) : v;
+    }
+    return out;
+  }
+
+  function formatDateUTC(d) {
+    const y = d.getUTCFullYear();
+    const mo = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const da = String(d.getUTCDate()).padStart(2, "0");
+    return `${y}-${mo}-${da}`;
+  }
+
+  // 엑셀 날짜 일련번호(1899-12-30을 0으로 보는 방식) -> YYYY-MM-DD 문자열.
+  function excelSerialToDateStr(serial) {
+    const ms = Math.round((serial - 25569) * 86400 * 1000);
+    return formatDateUTC(new Date(ms));
+  }
+
   function parseNumberLoose(v) {
     if (v == null) return NaN;
+    if (typeof v === "number") return Number.isFinite(v) ? v : NaN;
     const s = String(v).trim().replace(/[,₩%원\s]/g, "");
     if (s === "" || s === "-") return NaN;
     const n = Number(s);
@@ -123,8 +149,17 @@
 
   function parseDateLoose(v) {
     if (v == null) return null;
+    // cellDates가 못 알아본 엑셀 날짜 일련번호가 숫자 그대로 남아있는 경우
+    if (typeof v === "number") {
+      return v > 20000 && v < 80000 ? excelSerialToDateStr(v) : null;
+    }
     let s = String(v).trim();
     if (!s) return null;
+    // 문자열이지만 순수 숫자(엑셀이 raw:true에서도 텍스트로 내보낸 일련번호)인 경우
+    if (/^\d{4,6}(\.\d+)?$/.test(s)) {
+      const n = Number(s);
+      if (n > 20000 && n < 80000) return excelSerialToDateStr(n);
+    }
     if (/^\d{8}$/.test(s)) {
       s = `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
     } else {
