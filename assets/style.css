@@ -277,6 +277,12 @@ select, input[type="text"] {
   margin-bottom: 10px;
 }
 
+.toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 button.primary {
   background: var(--series-1);
   color: #fff;

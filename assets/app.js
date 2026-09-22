@@ -582,23 +582,37 @@
     renderTable();
   });
 
-  el("downloadFilteredBtn").addEventListener("click", () => {
+  function buildDownloadRows() {
     const rows = getFilteredSortedRows();
-    const renamed = rows.map((row) => {
+    return rows.map((row) => {
       const out = { 플랫폼: PLATFORM_LABEL[row.__platform] || row.__platform, 파일: row.__file };
       for (const col of state.columns) out[col] = row[col] ?? "";
       return out;
     });
-    const csv = Papa.unparse(renamed);
-    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+  }
+
+  function triggerBlobDownload(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `ad_report_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+  }
+
+  el("downloadFilteredBtn").addEventListener("click", () => {
+    const csv = Papa.unparse(buildDownloadRows());
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    triggerBlobDownload(blob, `ad_report_${new Date().toISOString().slice(0, 10)}.csv`);
+  });
+
+  el("downloadFilteredXlsxBtn").addEventListener("click", () => {
+    const worksheet = XLSX.utils.json_to_sheet(buildDownloadRows());
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "리포트");
+    XLSX.writeFile(workbook, `ad_report_${new Date().toISOString().slice(0, 10)}.xlsx`);
   });
 
   const themeToggle = el("themeToggle");

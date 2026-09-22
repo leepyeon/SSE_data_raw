@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>쿠팡 · 네이버 광고 리포트</title>
-<link rel="stylesheet" href="assets/style.css" />
+<link rel="stylesheet" href="assets/style.css?v=3" />
 </head>
 <body>
 <div class="page">
@@ -56,7 +56,10 @@
   <div class="card" id="tableCard" style="display:none;">
     <div class="toolbar">
       <h2 style="margin:0;">원본 데이터</h2>
-      <button class="primary" id="downloadFilteredBtn" type="button">현재 조건으로 CSV 다운로드</button>
+      <div class="toolbar-actions">
+        <button class="primary" id="downloadFilteredBtn" type="button">현재 조건으로 CSV 다운로드</button>
+        <button class="primary" id="downloadFilteredXlsxBtn" type="button">현재 조건으로 XLSX 다운로드</button>
+      </div>
     </div>
     <div class="table-scroll">
       <table>
@@ -77,6 +80,7 @@
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="assets/app.js"></script>
+<!-- app.js를 바꿀 때마다 아래 v= 숫자를 올려서, 예전 파일이 브라우저에 캐시되어 남아있는 문제를 방지합니다. -->
+<script src="assets/app.js?v=3"></script>
 </body>
 </html>
