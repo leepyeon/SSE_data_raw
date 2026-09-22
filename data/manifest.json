@@ -1,12 +1,6 @@
 {
   "files": [
     {
-      "platform": "coupang",
-      "name": "TEST.xlsx",
-      "path": "data/coupang/TEST.xlsx",
-      "size": 283989
-    },
-    {
       "platform": "naver",
       "name": "NAVER_애드부스트_20260915~20260921.csv",
       "path": "data/naver/NAVER_애드부스트_20260915~20260921.csv",
