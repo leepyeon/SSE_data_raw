@@ -1,3 +1,10 @@
 {
-  "files": []
+  "files": [
+    {
+      "platform": "coupang",
+      "name": "TEST.xlsx",
+      "path": "data/coupang/TEST.xlsx",
+      "size": 283989
+    }
+  ]
 }
