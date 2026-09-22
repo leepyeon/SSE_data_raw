@@ -1,6 +1,24 @@
 {
   "files": [
     {
+      "platform": "coupang",
+      "name": "쿠팡_A00534677_pa_daily_keyword_20260914_20260920.xlsx",
+      "path": "data/coupang/쿠팡_A00534677_pa_daily_keyword_20260914_20260920.xlsx",
+      "size": 2600111
+    },
+    {
+      "platform": "coupang",
+      "name": "쿠팡_BPA_A00111021_ba_daily_adGroup_20260914_20260920.xlsx",
+      "path": "data/coupang/쿠팡_BPA_A00111021_ba_daily_adGroup_20260914_20260920.xlsx",
+      "size": 22172
+    },
+    {
+      "platform": "coupang",
+      "name": "쿠팡_NCA_2620260922_A00534677_custom_report.xlsx",
+      "path": "data/coupang/쿠팡_NCA_2620260922_A00534677_custom_report.xlsx",
+      "size": 104467
+    },
+    {
       "platform": "naver",
       "name": "NAVER_애드부스트_20260915~20260921.csv",
       "path": "data/naver/NAVER_애드부스트_20260915~20260921.csv",
