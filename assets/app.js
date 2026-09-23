@@ -164,9 +164,38 @@
       const rows = XLSX.utils.sheet_to_json(sheet, { raw: true, defval: "" });
       return rows.map((row) => trimKeys(normalizeXlsxRow(row)));
     }
-    const text = decodeCsvBuffer(buf).replace(/^﻿/, "");
+    const text = stripLeadingTitleLine(decodeCsvBuffer(buf).replace(/^﻿/, ""));
     const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
     return parsed.data.map(trimKeys);
+  }
+
+  function countCsvFields(line) {
+    let count = 1;
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') inQuotes = !inQuotes;
+      else if (ch === "," && !inQuotes) count++;
+    }
+    return count;
+  }
+
+  // 네이버 리포트 중 일부(예: 쇼핑검색광고(카탈로그) 다운로드)는 실제 헤더 위에
+  // "리포트 제목,ID" 같은 한 줄짜리 메타데이터 행이 붙어 있어서, 그걸 헤더로
+  // 잘못 읽으면 노출수/클릭수/총비용은 물론 캠페인/그룹/날짜까지 다 깨진다.
+  // 첫 줄의 필드 수가 둘째 줄보다 훨씬 적으면 첫 줄을 제목으로 보고 건너뛴다.
+  function stripLeadingTitleLine(text) {
+    const nl = text.indexOf("\n");
+    if (nl === -1) return text;
+    const firstLine = text.slice(0, nl).replace(/\r$/, "");
+    const nl2 = text.indexOf("\n", nl + 1);
+    const secondLine = (nl2 === -1 ? text.slice(nl + 1) : text.slice(nl + 1, nl2)).replace(/\r$/, "");
+    const firstCount = countCsvFields(firstLine);
+    const secondCount = countCsvFields(secondLine);
+    if (firstCount <= 2 && secondCount >= firstCount + 3) {
+      return text.slice(nl + 1);
+    }
+    return text;
   }
 
   // sheet_to_json이 돌려준 JS Date 객체를 문자열로 바꿔서, 이후 파싱 로직이
