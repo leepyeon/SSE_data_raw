@@ -413,20 +413,29 @@
   // ---------- INDEX/ 품목 분류 ----------
 
   // INDEX 엑셀 한 시트에 캠페인ID→품목(B~F열), VIID→품목(H~L열) 두 개의
-  // 독립된 표가 나란히 들어있다(행이 서로 대응되는 게 아님). header:1로 읽은
-  // 배열 인덱스는 엑셀 열과 그대로 대응(A=0, B=1, C=2 ...).
-  function buildIndexMaps(matrix) {
+  // 독립된 표가 나란히 들어있다(행이 서로 대응되는 게 아님).
+  // 주의: 이 파일은 A열이 완전히 비어있어서, header:1 배열모드로 읽으면
+  // 시트의 실제 사용범위(!ref)가 B열부터 시작해 배열 인덱스가 한 칸씩
+  // 밀리는 문제가 있었다(그 결과 모든 행이 "미분류"로 나옴). 그래서
+  // 배열 인덱스 대신 "C2", "E2"처럼 셀 주소를 직접 읽어서 이 문제를 피한다.
+  function sheetCellText(sheet, colLetter, rowNum) {
+    const cell = sheet[`${colLetter}${rowNum}`];
+    if (!cell || cell.v == null) return "";
+    return String(cell.v).trim();
+  }
+
+  function buildIndexMaps(sheet) {
     const byCampaignGroup = new Map();
     const byCampaignId = new Map();
     const ambiguousCampaignIds = new Set();
     const byViid = new Map();
-    for (let i = 1; i < matrix.length; i++) {
-      const arr = matrix[i];
-      if (!arr) continue;
-      const cid = normalizeId(arr[2]); // C열 캠페인ID
-      const item = arr[4] != null ? String(arr[4]).trim() : ""; // E열 품목
+    const range = XLSX.utils.decode_range(sheet["!ref"] || "A1:A1");
+    const lastRow = range.e.r + 1; // 1행이 헤더이므로 2행부터 lastRow까지 순회
+    for (let r = 2; r <= lastRow; r++) {
+      const cid = normalizeId(sheetCellText(sheet, "C", r)); // C열 캠페인ID
+      const item = sheetCellText(sheet, "E", r); // E열 품목
       if (cid && item) {
-        const group = arr[3] != null ? String(arr[3]).trim() : ""; // D열 그룹명
+        const group = sheetCellText(sheet, "D", r); // D열 그룹명
         byCampaignGroup.set(`${cid}\u0001${group}`, item);
         // 같은 캠페인ID라도 그룹(=세부 프로모션)에 따라 품목이 갈리는 경우가 있어서,
         // 캠페인ID 단독 매칭은 그 캠페인의 모든 행이 같은 품목일 때만 신뢰한다.
@@ -439,8 +448,8 @@
           }
         }
       }
-      const vid = normalizeId(arr[8]); // I열 VIID
-      const rightItem = arr[10] != null ? String(arr[10]).trim() : ""; // K열 품목
+      const vid = normalizeId(sheetCellText(sheet, "I", r)); // I열 VIID
+      const rightItem = sheetCellText(sheet, "K", r); // K열 품목
       if (vid && rightItem) byViid.set(vid, rightItem);
     }
     return { byCampaignGroup, byCampaignId, ambiguousCampaignIds, byViid };
@@ -457,8 +466,7 @@
       const buf = await fetchArrayBuffer(latest.path);
       const workbook = XLSX.read(new Uint8Array(buf), { type: "array" });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: "" });
-      state.indexMaps = buildIndexMaps(matrix);
+      state.indexMaps = buildIndexMaps(sheet);
     } catch (e) {
       console.error("품목 분류 파일을 불러오지 못했습니다:", latest.path, e);
       state.indexMaps = null;
