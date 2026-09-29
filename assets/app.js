@@ -453,7 +453,10 @@
       state.indexMaps = null;
       return;
     }
-    const latest = [...files].sort((a, b) => b.name.localeCompare(a.name))[0];
+    // localeCompare는 로캘에 따라 "_"와 "."의 순서를 다르게 취급해서
+    // (예: "INDEX_260929_수정.xlsb"가 "INDEX_260929.xlsb"보다 최신인데도
+    // 거꾸로 뽑히는 문제가 있었다), 코드 포인트 그대로 비교해서 고른다.
+    const latest = [...files].sort((a, b) => (a.name > b.name ? -1 : a.name < b.name ? 1 : 0))[0];
     try {
       const buf = await fetchArrayBuffer(latest.path);
       const workbook = XLSX.read(new Uint8Array(buf), { type: "array" });
