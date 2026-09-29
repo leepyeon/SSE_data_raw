@@ -96,13 +96,10 @@
     { key: "roas", label: "ROAS", format: "pct" },
   ];
 
-  // 표1: 쿠팡은 INDEX/ 품목 분류 파일로 캠페인&그룹 대신 품목 기준으로 묶는다.
-  // 네이버는 품목 분류 데이터가 없으니 기존처럼 캠페인명/그룹명 기준.
-  const TABLE1_COLS_COUPANG = [
-    { key: "productType", label: "상품구분" },
-    { key: "itemCategory", label: "품목" },
-    ...METRIC_COLUMNS,
-  ];
+  // 표1: 쿠팡은 INDEX/ 품목 분류 파일로 캠페인&그룹, 상품구분 대신 품목
+  // 기준으로만 묶는다(상품구분이 달라도 같은 품목이면 하나로 합산).
+  // 네이버는 품목 분류 데이터가 없으니 기존처럼 상품구분+캠페인명/그룹명 기준.
+  const TABLE1_COLS_COUPANG = [{ key: "itemCategory", label: "품목" }, ...METRIC_COLUMNS];
   const TABLE1_COLS_NAVER = [
     { key: "productType", label: "상품구분" },
     { key: "campaign", label: "캠페인명" },
@@ -412,8 +409,8 @@
 
   // ---------- INDEX/ 품목 분류 ----------
 
-  // INDEX 엑셀 한 시트에 캠페인ID→품목(B~F열), VIID→품목(H~L열) 두 개의
-  // 독립된 표가 나란히 들어있다(행이 서로 대응되는 게 아님).
+  // INDEX 엑셀 한 시트에 캠페인ID/캠페인명/그룹명→품목(B~F열), VIID→품목(H~L열)
+  // 두 개의 독립된 표가 나란히 들어있다(행이 서로 대응되는 게 아님).
   // 주의: 이 파일은 A열이 완전히 비어있어서, header:1 배열모드로 읽으면
   // 시트의 실제 사용범위(!ref)가 B열부터 시작해 배열 인덱스가 한 칸씩
   // 밀리는 문제가 있었다(그 결과 모든 행이 "미분류"로 나옴). 그래서
@@ -424,35 +421,30 @@
     return String(cell.v).trim();
   }
 
+  // 캠페인ID/캠페인명/그룹명/VIID 각각을 단독 키로 조회하는 맵 4개를 만든다
+  // (여러 조건을 동시에 만족해야 하는 조합 키는 쓰지 않는다).
   function buildIndexMaps(sheet) {
-    const byCampaignGroup = new Map();
     const byCampaignId = new Map();
-    const ambiguousCampaignIds = new Set();
+    const byCampaignName = new Map();
+    const byGroupName = new Map();
     const byViid = new Map();
     const range = XLSX.utils.decode_range(sheet["!ref"] || "A1:A1");
     const lastRow = range.e.r + 1; // 1행이 헤더이므로 2행부터 lastRow까지 순회
     for (let r = 2; r <= lastRow; r++) {
-      const cid = normalizeId(sheetCellText(sheet, "C", r)); // C열 캠페인ID
       const item = sheetCellText(sheet, "E", r); // E열 품목
-      if (cid && item) {
-        const group = sheetCellText(sheet, "D", r); // D열 그룹명
-        byCampaignGroup.set(`${cid}\u0001${group}`, item);
-        // 같은 캠페인ID라도 그룹(=세부 프로모션)에 따라 품목이 갈리는 경우가 있어서,
-        // 캠페인ID 단독 매칭은 그 캠페인의 모든 행이 같은 품목일 때만 신뢰한다.
-        if (!ambiguousCampaignIds.has(cid)) {
-          if (byCampaignId.has(cid) && byCampaignId.get(cid) !== item) {
-            ambiguousCampaignIds.add(cid);
-            byCampaignId.delete(cid);
-          } else {
-            byCampaignId.set(cid, item);
-          }
-        }
+      if (item) {
+        const campaignName = sheetCellText(sheet, "B", r); // B열 캠페인명
+        const cid = normalizeId(sheetCellText(sheet, "C", r)); // C열 캠페인ID
+        const groupName = sheetCellText(sheet, "D", r); // D열 그룹명
+        if (cid) byCampaignId.set(cid, item);
+        if (campaignName) byCampaignName.set(campaignName, item);
+        if (groupName) byGroupName.set(groupName, item);
       }
       const vid = normalizeId(sheetCellText(sheet, "I", r)); // I열 VIID
       const rightItem = sheetCellText(sheet, "K", r); // K열 품목
       if (vid && rightItem) byViid.set(vid, rightItem);
     }
-    return { byCampaignGroup, byCampaignId, ambiguousCampaignIds, byViid };
+    return { byCampaignId, byCampaignName, byGroupName, byViid };
   }
 
   async function loadIndexMaps() {
@@ -473,25 +465,43 @@
     }
   }
 
-  // 쿠팡 raw 한 행의 품목을 찾는다: 캠페인ID+그룹명 매칭 -> 캠페인ID 단독 매칭
-  // (모호하지 않을 때만) -> VIID 매칭 -> 그래도 없으면 "미분류".
+  // 쿠팡 상품구분별로 품목을 조회할 때 시도할 순서. 각 단계는 단독 키로만
+  // 조회하고(조합 키 아님), 앞 단계에서 못 찾으면 다음 단계로 넘어간다.
+  const ITEM_CATEGORY_LOOKUP_ORDER = {
+    PA: ["campaignId", "campaignName", "groupName", "viid"],
+    BPA: ["campaignName", "groupName"],
+    NCA: ["campaignName"],
+    __default__: ["campaignId", "campaignName", "groupName", "viid"],
+  };
+
+  // 쿠팡 raw 한 행의 품목을 찾는다. 상품구분(PA/BPA/NCA)에 따라 정해진 순서로
+  // 캠페인ID/캠페인명/그룹명/VIID를 단독 키로 조회하고, 그래도 없으면 "미분류".
   // 네이버는 품목 분류 데이터가 없으므로 항상 null.
-  function resolveItemCategory(row, fp, platform) {
+  function resolveItemCategory(row, fp, platform, productType) {
     if (platform !== "coupang") return null;
     const maps = state.indexMaps;
     if (!maps) return "미분류";
     const cidCol = resolveField(fp, platform, "campaignId");
+    const campaignCol = resolveField(fp, platform, "campaign");
     const groupCol = resolveField(fp, platform, "group");
     const viidCol = resolveField(fp, platform, "viid");
-    const cid = cidCol ? normalizeId(row[cidCol]) : "";
-    if (cid) {
-      const group = groupCol ? String(row[groupCol] ?? "").trim() : "";
-      const key = `${cid}\u0001${group}`;
-      if (maps.byCampaignGroup.has(key)) return maps.byCampaignGroup.get(key);
-      if (maps.byCampaignId.has(cid)) return maps.byCampaignId.get(cid);
+    const values = {
+      campaignId: cidCol ? normalizeId(row[cidCol]) : "",
+      campaignName: campaignCol ? String(row[campaignCol] ?? "").trim() : "",
+      groupName: groupCol ? String(row[groupCol] ?? "").trim() : "",
+      viid: viidCol ? normalizeId(row[viidCol]) : "",
+    };
+    const mapFor = {
+      campaignId: maps.byCampaignId,
+      campaignName: maps.byCampaignName,
+      groupName: maps.byGroupName,
+      viid: maps.byViid,
+    };
+    const order = ITEM_CATEGORY_LOOKUP_ORDER[productType] || ITEM_CATEGORY_LOOKUP_ORDER.__default__;
+    for (const field of order) {
+      const v = values[field];
+      if (v && mapFor[field].has(v)) return mapFor[field].get(v);
     }
-    const vid = viidCol ? normalizeId(row[viidCol]) : "";
-    if (vid && maps.byViid.has(vid)) return maps.byViid.get(vid);
     return "미분류";
   }
 
@@ -578,8 +588,9 @@
     }));
   }
 
-  // 표1. 전체기간 합산 (날짜 무시). 쿠팡은 상품구분+품목(INDEX 분류) 기준,
-  // 네이버는 품목 분류 데이터가 없어서 상품구분+캠페인명+그룹명 기준.
+  // 표1. 전체기간 합산 (날짜 무시). 쿠팡은 INDEX 분류로 찾은 품목 기준으로만
+  // 묶는다(상품구분이 달라도 같은 품목이면 하나로 합산). 네이버는 품목 분류
+  // 데이터가 없어서 기존처럼 상품구분+캠페인명+그룹명 기준.
   function computeTable1(platform) {
     const groups = new Map();
     for (const row of state.rows) {
@@ -590,9 +601,8 @@
       if (!date || !passesFilters(platform, date, row.__productType)) continue;
       const productType = row.__productType;
       if (platform === "coupang") {
-        const itemCategory = resolveItemCategory(row, fp, platform);
-        const key = `${productType}\u0001${itemCategory}`;
-        accumulateRow(groups, key, { productType, itemCategory }, row, fp, platform);
+        const itemCategory = resolveItemCategory(row, fp, platform, productType);
+        accumulateRow(groups, itemCategory, { itemCategory }, row, fp, platform);
       } else {
         const campaignCol = resolveField(fp, platform, "campaign");
         const groupCol = resolveField(fp, platform, "group");
@@ -604,7 +614,7 @@
     }
     const result = finalizeGroups(groups);
     if (platform === "coupang") {
-      return result.sort((a, b) => a.productType.localeCompare(b.productType) || a.itemCategory.localeCompare(b.itemCategory, "ko"));
+      return result.sort((a, b) => a.itemCategory.localeCompare(b.itemCategory, "ko"));
     }
     return result.sort(
       (a, b) => a.productType.localeCompare(b.productType) || a.campaign.localeCompare(b.campaign, "ko") || a.group.localeCompare(b.group, "ko")
