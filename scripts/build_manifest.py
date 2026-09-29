@@ -11,21 +11,25 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
+INDEX_DIR = ROOT / "INDEX"
 PLATFORMS = ["coupang", "naver"]
 PATTERNS = ["*.csv", "*.xlsx", "*.xls"]
+INDEX_PATTERNS = ["*.xlsb", "*.xlsx", "*.xls"]
+
+
+def collect(dir_path, patterns):
+    if not dir_path.exists():
+        return []
+    return sorted(
+        {p for pattern in patterns for p in dir_path.glob(pattern)},
+        key=lambda p: p.name,
+    )
 
 
 def build():
     files = []
     for platform in PLATFORMS:
-        platform_dir = DATA_DIR / platform
-        if not platform_dir.exists():
-            continue
-        paths = sorted(
-            {p for pattern in PATTERNS for p in platform_dir.glob(pattern)},
-            key=lambda p: p.name,
-        )
-        for data_path in paths:
+        for data_path in collect(DATA_DIR / platform, PATTERNS):
             files.append(
                 {
                     "platform": platform,
@@ -35,12 +39,24 @@ def build():
                 }
             )
 
+    # INDEX/ 폴더: 쿠팡 캠페인의 '품목' 분류표(캠페인ID/VIID -> 품목). 리포트가
+    # 파일명 기준으로 최신 것 하나를 골라서 쓴다.
+    index_files = []
+    for data_path in collect(INDEX_DIR, INDEX_PATTERNS):
+        index_files.append(
+            {
+                "name": data_path.name,
+                "path": data_path.relative_to(ROOT).as_posix(),
+                "size": data_path.stat().st_size,
+            }
+        )
+
     manifest_path = DATA_DIR / "manifest.json"
     manifest_path.write_text(
-        json.dumps({"files": files}, ensure_ascii=False, indent=2) + "\n",
+        json.dumps({"files": files, "indexFiles": index_files}, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    print(f"Wrote {manifest_path} with {len(files)} file(s).")
+    print(f"Wrote {manifest_path} with {len(files)} file(s), {len(index_files)} index file(s).")
 
 
 if __name__ == "__main__":

@@ -36,5 +36,12 @@
       "path": "data/naver/NAVER_카탈로그_20260915-20260921.csv",
       "size": 4676
     }
+  ],
+  "indexFiles": [
+    {
+      "name": "INDEX_260929.xlsb",
+      "path": "INDEX/INDEX_260929.xlsb",
+      "size": 107343
+    }
   ]
 }
