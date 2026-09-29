@@ -28,6 +28,9 @@
       clicks: "클릭수",
       conversions: "직접 판매수량(1일)",
       revenue: "직접 전환매출액(1일)",
+      // INDEX/ 품목 분류 파일과 매칭하기 위한 키. NCA는 둘 다 없어서 항상 "미분류"가 된다.
+      campaignId: "캠페인 ID",
+      viid: "광고집행 옵션ID",
     },
     naver: {
       date: ["기간", "일별"],
@@ -93,12 +96,22 @@
     { key: "roas", label: "ROAS", format: "pct" },
   ];
 
-  const TABLE1_COLS = [
+  // 표1: 쿠팡은 INDEX/ 품목 분류 파일로 캠페인&그룹 대신 품목 기준으로 묶는다.
+  // 네이버는 품목 분류 데이터가 없으니 기존처럼 캠페인명/그룹명 기준.
+  const TABLE1_COLS_COUPANG = [
+    { key: "productType", label: "상품구분" },
+    { key: "itemCategory", label: "품목" },
+    ...METRIC_COLUMNS,
+  ];
+  const TABLE1_COLS_NAVER = [
     { key: "productType", label: "상품구분" },
     { key: "campaign", label: "캠페인명" },
     { key: "group", label: "그룹명" },
     ...METRIC_COLUMNS,
   ];
+  function table1ColsFor(platform) {
+    return platform === "coupang" ? TABLE1_COLS_COUPANG : TABLE1_COLS_NAVER;
+  }
   const TABLE2_COLS = [{ key: "productType", label: "상품구분" }, ...METRIC_COLUMNS];
   const TABLE3_COLS = [
     { key: "weekLabel", label: "주차" },
@@ -117,6 +130,7 @@
     selectedPaths: new Set(),
     rows: [], // 원본 raw 행 (플랫폼/파일 태그 포함)
     colsByFile: new Map(), // filePath -> Set(원본 컬럼명)
+    indexMaps: null, // INDEX/ 품목 분류 파일에서 만든 조회용 맵 (쿠팡 전용)
     activePlatform: "coupang",
     table1Page: 1,
     // 슬라이서 선택 상태 - 플랫폼(탭)마다 따로 기억한다(탭을 바꿔도 유지됨).
@@ -220,6 +234,18 @@
   function excelSerialToDateStr(serial) {
     const ms = Math.round((serial - 25569) * 86400 * 1000);
     return formatDateUTC(new Date(ms));
+  }
+
+  // 캠페인ID/VIID 조회 키를 만들기 위한 정규화. 엑셀에서 숫자로 읽히면(92628741335.0
+  // 처럼 float) 소수부를 떼고, 문자열이면 앞뒤 공백만 지운다.
+  function normalizeId(v) {
+    if (v == null) return "";
+    if (typeof v === "number") {
+      return Number.isFinite(v) ? String(Math.round(v)) : "";
+    }
+    const s = String(v).trim();
+    if (/^\d+(\.0+)?$/.test(s)) return String(Math.round(Number(s)));
+    return s;
   }
 
   function parseNumberLoose(v) {
@@ -384,6 +410,83 @@
     return "기타";
   }
 
+  // ---------- INDEX/ 품목 분류 ----------
+
+  // INDEX 엑셀 한 시트에 캠페인ID→품목(B~F열), VIID→품목(H~L열) 두 개의
+  // 독립된 표가 나란히 들어있다(행이 서로 대응되는 게 아님). header:1로 읽은
+  // 배열 인덱스는 엑셀 열과 그대로 대응(A=0, B=1, C=2 ...).
+  function buildIndexMaps(matrix) {
+    const byCampaignGroup = new Map();
+    const byCampaignId = new Map();
+    const ambiguousCampaignIds = new Set();
+    const byViid = new Map();
+    for (let i = 1; i < matrix.length; i++) {
+      const arr = matrix[i];
+      if (!arr) continue;
+      const cid = normalizeId(arr[2]); // C열 캠페인ID
+      const item = arr[4] != null ? String(arr[4]).trim() : ""; // E열 품목
+      if (cid && item) {
+        const group = arr[3] != null ? String(arr[3]).trim() : ""; // D열 그룹명
+        byCampaignGroup.set(`${cid}\u0001${group}`, item);
+        // 같은 캠페인ID라도 그룹(=세부 프로모션)에 따라 품목이 갈리는 경우가 있어서,
+        // 캠페인ID 단독 매칭은 그 캠페인의 모든 행이 같은 품목일 때만 신뢰한다.
+        if (!ambiguousCampaignIds.has(cid)) {
+          if (byCampaignId.has(cid) && byCampaignId.get(cid) !== item) {
+            ambiguousCampaignIds.add(cid);
+            byCampaignId.delete(cid);
+          } else {
+            byCampaignId.set(cid, item);
+          }
+        }
+      }
+      const vid = normalizeId(arr[8]); // I열 VIID
+      const rightItem = arr[10] != null ? String(arr[10]).trim() : ""; // K열 품목
+      if (vid && rightItem) byViid.set(vid, rightItem);
+    }
+    return { byCampaignGroup, byCampaignId, ambiguousCampaignIds, byViid };
+  }
+
+  async function loadIndexMaps() {
+    const files = Array.isArray(state.manifest.indexFiles) ? state.manifest.indexFiles : [];
+    if (files.length === 0) {
+      state.indexMaps = null;
+      return;
+    }
+    const latest = [...files].sort((a, b) => b.name.localeCompare(a.name))[0];
+    try {
+      const buf = await fetchArrayBuffer(latest.path);
+      const workbook = XLSX.read(new Uint8Array(buf), { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: "" });
+      state.indexMaps = buildIndexMaps(matrix);
+    } catch (e) {
+      console.error("품목 분류 파일을 불러오지 못했습니다:", latest.path, e);
+      state.indexMaps = null;
+    }
+  }
+
+  // 쿠팡 raw 한 행의 품목을 찾는다: 캠페인ID+그룹명 매칭 -> 캠페인ID 단독 매칭
+  // (모호하지 않을 때만) -> VIID 매칭 -> 그래도 없으면 "미분류".
+  // 네이버는 품목 분류 데이터가 없으므로 항상 null.
+  function resolveItemCategory(row, fp, platform) {
+    if (platform !== "coupang") return null;
+    const maps = state.indexMaps;
+    if (!maps) return "미분류";
+    const cidCol = resolveField(fp, platform, "campaignId");
+    const groupCol = resolveField(fp, platform, "group");
+    const viidCol = resolveField(fp, platform, "viid");
+    const cid = cidCol ? normalizeId(row[cidCol]) : "";
+    if (cid) {
+      const group = groupCol ? String(row[groupCol] ?? "").trim() : "";
+      const key = `${cid}\u0001${group}`;
+      if (maps.byCampaignGroup.has(key)) return maps.byCampaignGroup.get(key);
+      if (maps.byCampaignId.has(cid)) return maps.byCampaignId.get(cid);
+    }
+    const vid = viidCol ? normalizeId(row[viidCol]) : "";
+    if (vid && maps.byViid.has(vid)) return maps.byViid.get(vid);
+    return "미분류";
+  }
+
   // ---------- 데이터 로드 ----------
 
   async function loadManifest() {
@@ -395,6 +498,7 @@
     }
     if (!Array.isArray(state.manifest.files)) state.manifest.files = [];
     state.selectedPaths = new Set(state.manifest.files.map((f) => f.path));
+    await loadIndexMaps();
     await reloadData();
   }
 
@@ -466,7 +570,8 @@
     }));
   }
 
-  // 표1. 상품구분+캠페인명+그룹명 기준 전체기간 합산 (날짜 무시)
+  // 표1. 전체기간 합산 (날짜 무시). 쿠팡은 상품구분+품목(INDEX 분류) 기준,
+  // 네이버는 품목 분류 데이터가 없어서 상품구분+캠페인명+그룹명 기준.
   function computeTable1(platform) {
     const groups = new Map();
     for (const row of state.rows) {
@@ -475,15 +580,25 @@
       const dateCol = resolveField(fp, platform, "date");
       const date = dateCol ? parseDateLoose(row[dateCol]) : null;
       if (!date || !passesFilters(platform, date, row.__productType)) continue;
-      const campaignCol = resolveField(fp, platform, "campaign");
-      const groupCol = resolveField(fp, platform, "group");
-      const campaign = campaignCol ? row[campaignCol] ?? "" : "";
-      const group = groupCol ? row[groupCol] ?? "" : "";
       const productType = row.__productType;
-      const key = `${productType}\u0001${campaign}\u0001${group}`;
-      accumulateRow(groups, key, { productType, campaign, group }, row, fp, platform);
+      if (platform === "coupang") {
+        const itemCategory = resolveItemCategory(row, fp, platform);
+        const key = `${productType}\u0001${itemCategory}`;
+        accumulateRow(groups, key, { productType, itemCategory }, row, fp, platform);
+      } else {
+        const campaignCol = resolveField(fp, platform, "campaign");
+        const groupCol = resolveField(fp, platform, "group");
+        const campaign = campaignCol ? row[campaignCol] ?? "" : "";
+        const group = groupCol ? row[groupCol] ?? "" : "";
+        const key = `${productType}\u0001${campaign}\u0001${group}`;
+        accumulateRow(groups, key, { productType, campaign, group }, row, fp, platform);
+      }
     }
-    return finalizeGroups(groups).sort(
+    const result = finalizeGroups(groups);
+    if (platform === "coupang") {
+      return result.sort((a, b) => a.productType.localeCompare(b.productType) || a.itemCategory.localeCompare(b.itemCategory, "ko"));
+    }
+    return result.sort(
       (a, b) => a.productType.localeCompare(b.productType) || a.campaign.localeCompare(b.campaign, "ko") || a.group.localeCompare(b.group, "ko")
     );
   }
@@ -644,7 +759,7 @@
   }
 
   function cellText(row, col) {
-    if (col.key === "rank" || col.key === "productType" || col.key === "productName" || col.key === "campaign" || col.key === "group" || col.key === "weekLabel") {
+    if (col.key === "rank" || col.key === "productType" || col.key === "productName" || col.key === "campaign" || col.key === "group" || col.key === "weekLabel" || col.key === "itemCategory") {
       return row[col.key] ?? "";
     }
     return formatMetric(row[col.key], col.format);
@@ -687,7 +802,7 @@
     const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
     state.table1Page = Math.min(Math.max(1, state.table1Page), totalPages);
     const pageRows = rows.slice((state.table1Page - 1) * PAGE_SIZE, state.table1Page * PAGE_SIZE);
-    renderMetricTable(el("table1Head"), el("table1Body"), TABLE1_COLS, pageRows, "데이터가 없습니다.");
+    renderMetricTable(el("table1Head"), el("table1Body"), table1ColsFor(state.activePlatform), pageRows, "데이터가 없습니다.");
     el("table1PageInfo").textContent = `총 ${rows.length.toLocaleString("ko-KR")}행 · ${state.table1Page} / ${totalPages} 페이지`;
     el("table1PrevBtn").disabled = state.table1Page <= 1;
     el("table1NextBtn").disabled = state.table1Page >= totalPages;
@@ -730,7 +845,7 @@
   // ---------- 화면을 엑셀로 다운로드 ----------
 
   function exportCellValue(row, col) {
-    if (col.key === "rank" || col.key === "productType" || col.key === "productName" || col.key === "campaign" || col.key === "group" || col.key === "weekLabel") {
+    if (col.key === "rank" || col.key === "productType" || col.key === "productName" || col.key === "campaign" || col.key === "group" || col.key === "weekLabel" || col.key === "itemCategory") {
       return row[col.key] ?? "";
     }
     const v = row[col.key];
@@ -753,7 +868,7 @@
 
   function buildPlatformSheet(platform) {
     const aoa = [];
-    addTableToAOA(aoa, "표1. 전체기간의 지표", TABLE1_COLS, computeTable1(platform));
+    addTableToAOA(aoa, "표1. 전체기간의 지표", table1ColsFor(platform), computeTable1(platform));
     addTableToAOA(aoa, "표2. 광고상품별 지표 (전체기간)", TABLE2_COLS, computeTable2(platform));
     addTableToAOA(aoa, "표3. 주차별, 광고상품별 지표", TABLE3_COLS, computeTable3(platform));
     addTableToAOA(aoa, "표4. 우수 판매 TOP10 상품", TABLE4_COLS, computeTable4(platform));
