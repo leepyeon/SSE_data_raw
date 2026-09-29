@@ -469,7 +469,7 @@
   // 조회하고(조합 키 아님), 앞 단계에서 못 찾으면 다음 단계로 넘어간다.
   const ITEM_CATEGORY_LOOKUP_ORDER = {
     PA: ["campaignId", "campaignName", "groupName", "viid"],
-    BPA: ["campaignName", "groupName"],
+    BPA: ["campaignId", "groupName"],
     NCA: ["campaignName"],
     __default__: ["campaignId", "campaignName", "groupName", "viid"],
   };
