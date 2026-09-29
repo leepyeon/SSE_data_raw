@@ -132,8 +132,8 @@
     table1Page: 1,
     // 슬라이서 선택 상태 - 플랫폼(탭)마다 따로 기억한다(탭을 바꿔도 유지됨).
     filters: {
-      coupang: { years: new Set(), months: new Set(), productTypes: new Set() },
-      naver: { years: new Set(), months: new Set(), productTypes: new Set() },
+      coupang: { years: new Set(), months: new Set(), productTypes: new Set(), itemCategories: new Set() },
+      naver: { years: new Set(), months: new Set(), productTypes: new Set(), itemCategories: new Set() },
     },
   };
 
@@ -308,22 +308,26 @@
     return dateStr.slice(5, 7);
   }
 
-  // 년도/월/광고상품유형 슬라이서 선택 상태에 이 행(날짜+상품구분)이 걸리는지.
-  // 어떤 슬라이서도 선택 안 했으면(빈 Set) 그 기준은 통과시킨다(=전체 보기).
-  function passesFilters(platform, date, productType) {
+  // 년도/월/광고상품유형/품목 슬라이서 선택 상태에 이 행(날짜+상품구분+품목)이
+  // 걸리는지. 어떤 슬라이서도 선택 안 했으면(빈 Set) 그 기준은 통과시킨다
+  // (=전체 보기). 품목은 쿠팡 전용이라 네이버에서는 itemCategory가 항상
+  // null이고, 네이버 쪽 itemCategories 슬라이서도 항상 비어있어 걸리지 않는다.
+  function passesFilters(platform, date, productType, itemCategory) {
     const f = state.filters[platform];
     if (f.years.size && !f.years.has(yearOf(date))) return false;
     if (f.months.size && !f.months.has(monthOf(date))) return false;
     if (f.productTypes.size && !f.productTypes.has(productType)) return false;
+    if (f.itemCategories.size && !f.itemCategories.has(itemCategory)) return false;
     return true;
   }
 
-  // 현재 플랫폼에 실제로 존재하는 년도/월/상품구분 목록 (슬라이서 버튼 목록用).
-  // 지금 선택된 필터와 무관하게 전체 목록을 보여준다.
+  // 현재 플랫폼에 실제로 존재하는 년도/월/상품구분/품목 목록 (슬라이서 버튼
+  // 목록用). 지금 선택된 필터와 무관하게 전체 목록을 보여준다.
   function computeFilterOptions(platform) {
     const years = new Set();
     const months = new Set();
     const productTypes = new Set();
+    const itemCategories = new Set();
     for (const row of state.rows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
@@ -334,11 +338,15 @@
         months.add(monthOf(date));
       }
       productTypes.add(row.__productType);
+      if (platform === "coupang") {
+        itemCategories.add(resolveItemCategory(row, fp, platform, row.__productType));
+      }
     }
     return {
       years: [...years].sort(),
       months: [...months].sort(),
       productTypes: [...productTypes].sort(),
+      itemCategories: [...itemCategories].sort((a, b) => a.localeCompare(b, "ko")),
     };
   }
 
@@ -591,6 +599,11 @@
     }));
   }
 
+  // 품목 슬라이서 필터링用. 쿠팡이 아니면 품목 분류 자체가 없으므로 null.
+  function rowItemCategory(row, fp, platform, productType) {
+    return platform === "coupang" ? resolveItemCategory(row, fp, platform, productType) : null;
+  }
+
   // 표1. 전체기간 합산 (날짜 무시). 쿠팡은 INDEX 분류로 찾은 품목 기준으로만
   // 묶는다(상품구분이 달라도 같은 품목이면 하나로 합산). 네이버는 품목 분류
   // 데이터가 없어서 기존처럼 상품구분+캠페인명+그룹명 기준.
@@ -601,10 +614,10 @@
       const fp = row.__filePath;
       const dateCol = resolveField(fp, platform, "date");
       const date = dateCol ? parseDateLoose(row[dateCol]) : null;
-      if (!date || !passesFilters(platform, date, row.__productType)) continue;
       const productType = row.__productType;
+      const itemCategory = rowItemCategory(row, fp, platform, productType);
+      if (!date || !passesFilters(platform, date, productType, itemCategory)) continue;
       if (platform === "coupang") {
-        const itemCategory = resolveItemCategory(row, fp, platform, productType);
         accumulateRow(groups, itemCategory, { itemCategory }, row, fp, platform);
       } else {
         const campaignCol = resolveField(fp, platform, "campaign");
@@ -633,7 +646,8 @@
       const dateCol = resolveField(fp, platform, "date");
       const date = dateCol ? parseDateLoose(row[dateCol]) : null;
       const productType = row.__productType;
-      if (!date || !passesFilters(platform, date, productType)) continue;
+      const itemCategory = rowItemCategory(row, fp, platform, productType);
+      if (!date || !passesFilters(platform, date, productType, itemCategory)) continue;
       accumulateRow(groups, productType, { productType }, row, fp, platform);
     }
     return finalizeGroups(groups).sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
@@ -648,7 +662,8 @@
       const dateCol = resolveField(fp, platform, "date");
       const date = dateCol ? parseDateLoose(row[dateCol]) : null;
       const productType = row.__productType;
-      if (!date || !passesFilters(platform, date, productType)) continue;
+      const itemCategory = rowItemCategory(row, fp, platform, productType);
+      if (!date || !passesFilters(platform, date, productType, itemCategory)) continue;
       const week = weekOf(date);
       const key = `${week.key}\u0001${productType}`;
       accumulateRow(groups, key, { weekKey: week.key, weekLabel: week.label, productType }, row, fp, platform);
@@ -665,7 +680,8 @@
       const dateCol = resolveField(fp, platform, "date");
       const date = dateCol ? parseDateLoose(row[dateCol]) : null;
       const productType = row.__productType;
-      if (!date || !passesFilters(platform, date, productType)) continue;
+      const itemCategory = rowItemCategory(row, fp, platform, productType);
+      if (!date || !passesFilters(platform, date, productType, itemCategory)) continue;
       const campaignCol = resolveField(fp, platform, "campaign");
       const groupCol = resolveField(fp, platform, "group");
       const campaign = campaignCol ? row[campaignCol] ?? "" : "";
@@ -728,6 +744,7 @@
     renderSlicerGroup("yearSlicer", options.years, f.years, (y) => `${y}년`);
     renderSlicerGroup("monthSlicer", options.months, f.months, (m) => `${Number(m)}월`);
     renderSlicerGroup("productTypeSlicer", options.productTypes, f.productTypes);
+    renderSlicerGroup("itemCategorySlicer", options.itemCategories, f.itemCategories);
   }
 
   function formatSize(bytes) {
