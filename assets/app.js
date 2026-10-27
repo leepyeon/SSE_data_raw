@@ -739,7 +739,6 @@
   function renderAll() {
     renderTabs();
     renderFileNotice();
-    renderRawDownload();
     renderSlicers();
     renderTable1();
     renderTable2();
@@ -807,31 +806,6 @@
     area.innerHTML = files
       .map((f) => `<div class="file-row"><span class="file-name">${escapeHtml(f.name)} (${formatSize(f.size)})</span></div>`)
       .join("");
-  }
-
-  // 원본 다운로드는 화면 맨 아래에서만 제공한다.
-  function renderRawDownload() {
-    const area = el("rawDownloadArea");
-    const files = filesForActivePlatform();
-    area.innerHTML = "";
-    if (files.length === 0) {
-      area.innerHTML = `<div class="empty-state">다운로드할 파일이 없습니다.</div>`;
-      return;
-    }
-    for (const f of files) {
-      const row = document.createElement("div");
-      row.className = "file-row";
-      const span = document.createElement("span");
-      span.className = "file-name";
-      span.textContent = `${f.name} (${formatSize(f.size)})`;
-      row.appendChild(span);
-      const link = document.createElement("a");
-      link.href = f.path;
-      link.download = f.name;
-      link.textContent = "원본 다운로드 ↓";
-      row.appendChild(link);
-      area.appendChild(row);
-    }
   }
 
   function cellText(row, col) {
@@ -1014,6 +988,153 @@
       XLSX.utils.book_append_sheet(workbook, sheets[name], name);
     }
     XLSX.writeFile(workbook, `주간RAW_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  });
+
+  // ---------- 리포트 다운로드 (쿠팡_전환상품_RAW/쿠팡 키워드_RAW 양식) ----------
+  // "리포트양식"의 CE_전환상품/MX_전환상품, CE_키워드/MX_키워드 피벗이 보여주는
+  // 집계와 같은 기준(날짜+캠페인+그룹+상품 단위로 키워드를 합쳐서 "전환상품",
+  // 날짜+캠페인+그룹+키워드 단위로 상품을 합쳐서 "키워드")으로 직접 합산해서,
+  // 쿠팡_상품광고 주간 리포트의 쿠팡_전환상품_RAW/쿠팡 키워드_RAW 시트와 같은
+  // 모양으로 만든다. 피벗 자체가 아니라 그 피벗이 보여주는 숫자만 재현하는
+  // 것이라 원본 피벗/바이너리는 건드리지 않는다.
+  const WEEKLY_REPORT_METRIC_FIELDS = [
+    "cost", "impressions", "clicks",
+    "totalConv1d", "conversions", "totalRevenue1d", "revenue",
+    "totalConv14d", "directConv14d", "totalRevenue14d", "directRevenue14d",
+  ];
+
+  function sumWeeklyMetrics(row, fp, platform, acc) {
+    for (const field of WEEKLY_REPORT_METRIC_FIELDS) {
+      const col = resolveField(fp, platform, field);
+      const n = col ? parseNumberLoose(row[col]) : NaN;
+      if (Number.isFinite(n)) acc[field] = (acc[field] || 0) + n;
+    }
+  }
+
+  function weeklyMetricValues(metrics) {
+    return WEEKLY_REPORT_METRIC_FIELDS.map((f) =>
+      Number.isFinite(metrics[f]) ? Math.round(metrics[f] * 100) / 100 : "-"
+    );
+  }
+
+  const CONVERSION_PRODUCT_HEADER = [
+    "집행 년", "집행 월", "주차", "날짜", "구분", "품목명", "광고유형", "캠페인 ID", "캠페인명", "그룹명",
+    "광고집행상품 VIID", "광고집행 상품명",
+    "광고비", "노출수", "클릭수",
+    "판매수량(1일)", "직접 판매수량(1일)", "전환매출액(1일)", "직접 전환매출액(1일)",
+    "판매수량(14일)", "직접 판매수량(14일)", "전환매출액(14일)", "직접 전환매출액(14일)",
+    "세부 품목",
+  ];
+
+  // 날짜+상품구분+캠페인+그룹+VIID+상품명 단위로 묶어서(키워드 구분 없이) 합산.
+  function buildConversionProductRows() {
+    const platform = "coupang";
+    const groups = new Map();
+    for (const row of state.rows) {
+      if (row.__platform !== platform) continue;
+      const fp = row.__filePath;
+      const productType = row.__productType;
+      const dateCol = resolveField(fp, platform, "date");
+      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      if (!date) continue;
+      const { item, subItem } = resolveItemClassification(row, fp, platform, productType);
+      const division = classifyDivision(item);
+      if (!division || !passesFilters(platform, date, productType, item)) continue;
+      const campaignIdRaw = weeklyRawText(row, fp, platform, "campaignId");
+      const campaignRaw = weeklyRawText(row, fp, platform, "campaign");
+      const groupRaw = weeklyRawText(row, fp, platform, "group");
+      const viidRaw = weeklyRawText(row, fp, platform, "viid");
+      const execProductNameRaw = weeklyRawText(row, fp, platform, "execProductName");
+      const key = [date, productType, campaignIdRaw, campaignRaw, groupRaw, viidRaw, execProductNameRaw].join("\u0001");
+      if (!groups.has(key)) {
+        groups.set(key, {
+          date, productType, division, item, subItem,
+          campaignIdRaw, campaignRaw, groupRaw, viidRaw, execProductNameRaw,
+          metrics: {},
+        });
+      }
+      sumWeeklyMetrics(row, fp, platform, groups.get(key).metrics);
+    }
+    return [...groups.values()].map((g) => [
+      `${yearOf(g.date)}년`,
+      `${Number(monthOf(g.date))}월`,
+      weekOfMonthLabel(g.date),
+      Number(g.date.replace(/-/g, "")),
+      g.division,
+      g.item,
+      g.productType,
+      g.campaignIdRaw,
+      g.campaignRaw,
+      g.groupRaw,
+      g.viidRaw,
+      g.execProductNameRaw,
+      ...weeklyMetricValues(g.metrics),
+      g.subItem,
+    ]);
+  }
+
+  const KEYWORD_HEADER = [
+    "년", "월", "주차", "날짜", "품목", "광고유형", "캠페인ID", "캠페인명", "그룹명", "키워드",
+    "광고비", "노출수", "클릭수",
+    "총 판매수량(1일)", "직접 판매수량(1일)", "총 전환매출액(1일)", "직접 전환매출액(1일)",
+    "총 판매수량(14일)", "직접 판매수량(14일)", "총 전환매출액(14일)", "직접 전환매출액(14일)",
+    "세부 품목",
+  ];
+
+  // 키워드는 PA에만 있어서 PA만 대상으로, 날짜+캠페인+그룹+키워드 단위로
+  // 묶어서(상품 구분 없이, CE/MX 구분도 없이) 합산.
+  function buildKeywordRows() {
+    const platform = "coupang";
+    const groups = new Map();
+    for (const row of state.rows) {
+      if (row.__platform !== platform || row.__productType !== "PA") continue;
+      const fp = row.__filePath;
+      const productType = row.__productType;
+      const dateCol = resolveField(fp, platform, "date");
+      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      if (!date) continue;
+      const { item, subItem } = resolveItemClassification(row, fp, platform, productType);
+      const division = classifyDivision(item);
+      if (!division || !passesFilters(platform, date, productType, item)) continue;
+      const campaignIdRaw = weeklyRawText(row, fp, platform, "campaignId");
+      const campaignRaw = weeklyRawText(row, fp, platform, "campaign");
+      const groupRaw = weeklyRawText(row, fp, platform, "group");
+      const keywordRaw = weeklyRawText(row, fp, platform, "keyword");
+      const key = [date, campaignIdRaw, campaignRaw, groupRaw, keywordRaw].join("\u0001");
+      if (!groups.has(key)) {
+        groups.set(key, { date, productType, item, subItem, campaignIdRaw, campaignRaw, groupRaw, keywordRaw, metrics: {} });
+      }
+      sumWeeklyMetrics(row, fp, platform, groups.get(key).metrics);
+    }
+    return [...groups.values()].map((g) => [
+      `${yearOf(g.date)}년`,
+      `${Number(monthOf(g.date))}월`,
+      weekOfMonthLabel(g.date),
+      Number(g.date.replace(/-/g, "")),
+      g.item,
+      g.productType,
+      g.campaignIdRaw,
+      g.campaignRaw,
+      g.groupRaw,
+      g.keywordRaw,
+      ...weeklyMetricValues(g.metrics),
+      g.subItem,
+    ]);
+  }
+
+  el("downloadReportBtn").addEventListener("click", () => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.aoa_to_sheet([CONVERSION_PRODUCT_HEADER, ...buildConversionProductRows()]),
+      "쿠팡_전환상품_RAW"
+    );
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.aoa_to_sheet([KEYWORD_HEADER, ...buildKeywordRows()]),
+      "쿠팡 키워드_RAW"
+    );
+    XLSX.writeFile(workbook, `쿠팡_상품광고_주간리포트_${new Date().toISOString().slice(0, 10)}.xlsx`);
   });
 
   const themeToggle = el("themeToggle");
