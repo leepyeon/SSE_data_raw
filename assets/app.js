@@ -892,20 +892,8 @@
     renderTable1();
   });
 
-  // ---------- 주간RAW 다운로드 (CE_RAW/MX_RAW/ce,mx 전체_raw 양식) ----------
-  // "리포트양식/CE_MX_주간RAW_양식.xlsb"의 CE_RAW/MX_RAW 시트와 동일한 25개
-  // 컬럼 구성. 이 버튼이 만든 파일은 그 양식의 CE_RAW/MX_RAW/ce,mx 전체_raw
-  // 시트에 그대로 복사해 넣고 피벗테이블을 새로고침하는 용도다(피벗 5개는
-  // 원본 바이너리를 직접 손대기엔 위험이 커서 건드리지 않는다).
-  const WEEKLY_RAW_HEADER = [
-    "집행 년", "집행 월", "날짜", "주차", "구분", "광고유형", "캠페인 ID", "품목",
-    "캠페인명", "그룹명", "광고집행상품 VIID", "광고집행 상품명", "키워드",
-    "광고비", "노출수", "클릭수",
-    "판매수량(1일)", "직접 판매수량(1일)", "전환매출액(1일)", "직접 전환매출액(1일)",
-    "판매수량(14일)", "직접 판매수량(14일)", "전환매출액(14일)", "직접 전환매출액(14일)",
-    "세부 품목",
-  ];
-
+  // 리포트RAW 다운로드(쿠팡_전환상품_RAW/쿠팡 키워드_RAW 등)에서 원본 컬럼
+  // 값을 그대로 옮길 때 쓴다. 컬럼이 없거나 비어있으면 "-".
   function weeklyRawText(row, fp, platform, field) {
     const col = resolveField(fp, platform, field);
     if (!col) return "-";
@@ -920,9 +908,20 @@
     return Number.isFinite(n) ? Math.round(n * 100) / 100 : "-";
   }
 
-  // 쿠팡 raw 한 행을 CE_RAW/MX_RAW 양식의 한 행(배열)으로 바꾼다. 품목으로
-  // 사업부(CE/MX)를 특정할 수 없으면(미분류) null을 돌려줘서 두 시트 어디에도
-  // 넣지 않는다 - 어느 사업부 매출인지 모르는 금액을 섞어 넣지 않기 위함.
+  // "리포트양식/CE_MX_주간RAW_양식.xlsb"의 CE_RAW/MX_RAW 시트와 동일한 25개
+  // 컬럼 구성. 쿠팡 raw 한 행을 CE_RAW/MX_RAW 양식의 한 행(배열)으로 바꾼다.
+  // 품목으로 사업부(CE/MX)를 특정할 수 없으면(미분류) null을 돌려줘서 두
+  // 시트 어디에도 넣지 않는다 - 어느 사업부 매출인지 모르는 금액을 섞어
+  // 넣지 않기 위함.
+  const WEEKLY_RAW_HEADER = [
+    "집행 년", "집행 월", "날짜", "주차", "구분", "광고유형", "캠페인 ID", "품목",
+    "캠페인명", "그룹명", "광고집행상품 VIID", "광고집행 상품명", "키워드",
+    "광고비", "노출수", "클릭수",
+    "판매수량(1일)", "직접 판매수량(1일)", "전환매출액(1일)", "직접 전환매출액(1일)",
+    "판매수량(14일)", "직접 판매수량(14일)", "전환매출액(14일)", "직접 전환매출액(14일)",
+    "세부 품목",
+  ];
+
   function buildWeeklyRawRow(row, fp, productType) {
     const platform = "coupang";
     const dateCol = resolveField(fp, platform, "date");
@@ -981,14 +980,6 @@
     };
   }
 
-  el("downloadWeeklyRawBtn").addEventListener("click", () => {
-    const sheets = buildWeeklyRawSheets();
-    const workbook = XLSX.utils.book_new();
-    for (const name of Object.keys(sheets)) {
-      XLSX.utils.book_append_sheet(workbook, sheets[name], name);
-    }
-    XLSX.writeFile(workbook, `주간RAW_${new Date().toISOString().slice(0, 10)}.xlsx`);
-  });
 
   // ---------- 리포트 다운로드 (쿠팡_전환상품_RAW/쿠팡 키워드_RAW 양식) ----------
   // "리포트양식"의 CE_전환상품/MX_전환상품, CE_키워드/MX_키워드 피벗이 보여주는
@@ -1124,6 +1115,10 @@
 
   el("downloadReportBtn").addEventListener("click", () => {
     const workbook = XLSX.utils.book_new();
+    const rawSheets = buildWeeklyRawSheets();
+    for (const name of Object.keys(rawSheets)) {
+      XLSX.utils.book_append_sheet(workbook, rawSheets[name], name);
+    }
     XLSX.utils.book_append_sheet(
       workbook,
       XLSX.utils.aoa_to_sheet([CONVERSION_PRODUCT_HEADER, ...buildConversionProductRows()]),
