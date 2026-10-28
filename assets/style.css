@@ -164,11 +164,22 @@ body {
   cursor: pointer;
 }
 
-.slicer-btn:hover {
-  background: var(--gridline);
+/* 터치 기기에서는 마지막으로 누른 버튼에 회색이 남지 않도록 마우스가 있을 때만 */
+@media (hover: hover) {
+  .slicer-btn:hover:not(:disabled) {
+    background: var(--gridline);
+  }
 }
 
-.slicer-btn.active {
+/* 다른 필터 조건에서 데이터가 없는 값: 자리는 그대로, 흐리게 + 못 누름 */
+.slicer-btn.unavailable {
+  opacity: 0.35;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+.slicer-btn.active,
+.slicer-btn.active:hover:not(:disabled) {
   background: var(--series-1);
   border-color: var(--series-1);
   color: #fff;
@@ -222,22 +233,74 @@ body {
   font-weight: 600;
 }
 
+/* 필터는 한 줄에 한 기준씩(왼쪽 이름 | 오른쪽 버튼) 고정 배치해서, 버튼
+   수가 바뀌어도 다른 기준의 위치가 밀리지 않게 한다. */
+.filter-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.filter-head h2 {
+  margin: 0;
+}
+
+.filter-reset {
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.filter-reset:hover:not(:disabled) {
+  background: var(--gridline);
+}
+
+.filter-reset:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .filter-row {
   display: flex;
-  flex-wrap: wrap;
-  gap: 20px;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .filter-group {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--gridline);
+}
+
+.filter-group:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
 }
 
 .filter-group .label {
   font-size: 12px;
-  color: var(--text-muted);
+  font-weight: 600;
+  color: var(--text-secondary);
+  padding-top: 7px;
+}
+
+@media (max-width: 600px) {
+  .filter-group {
+    grid-template-columns: 78px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .filter-group .label {
+    white-space: nowrap;
+  }
 }
 
 .chip-list {
@@ -809,4 +872,11 @@ tbody tr.total-row td {
 .pie-legend .legend-pct {
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
+}
+
+/* 필터 줄 안의 빈 안내 문구(예: 상세 품목 "품목을 고르면...")는 버튼 높이에 맞춤 */
+.chip-list .empty-state {
+  padding: 6px 0;
+  font-size: 12px;
+  color: var(--text-muted);
 }
