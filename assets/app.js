@@ -119,7 +119,7 @@
     { key: "revenue", label: "전환매출", format: "money" },
     { key: "cvr", label: "CVR", format: "pct" },
     { key: "aov", label: "객단가", format: "money" },
-    { key: "roas", label: "ROAS", format: "pct" },
+    { key: "roas", label: "ROAS", format: "pct0" },
   ];
 
   // 표1: 쿠팡은 INDEX/ 품목 분류 파일로 캠페인&그룹, 상품구분 대신 품목
@@ -167,8 +167,8 @@
     table1Page: 1,
     // 슬라이서 선택 상태 - 플랫폼(탭)마다 따로 기억한다(탭을 바꿔도 유지됨).
     filters: {
-      coupang: { years: new Set(), months: new Set(), productTypes: new Set(), itemCategories: new Set() },
-      naver: { years: new Set(), months: new Set(), productTypes: new Set(), itemCategories: new Set() },
+      coupang: { years: new Set(), months: new Set(), weeks: new Set(), productTypes: new Set(), itemCategories: new Set() },
+      naver: { years: new Set(), months: new Set(), weeks: new Set(), productTypes: new Set(), itemCategories: new Set() },
     },
   };
 
@@ -353,6 +353,17 @@
     return { key: formatDateUTC(monday), label: `${fmt(monday)}~${fmt(sunday)}` };
   }
 
+  // 필터/집계에서 같은 날짜로 수십만 번 부르므로 날짜별로 기억해 둔다.
+  const weekOfCache = new Map();
+  function weekKeyOf(dateStr) {
+    let w = weekOfCache.get(dateStr);
+    if (!w) {
+      w = weekOf(dateStr);
+      weekOfCache.set(dateStr, w);
+    }
+    return w.key;
+  }
+
   function yearOf(dateStr) {
     return dateStr.slice(0, 4);
   }
@@ -381,7 +392,7 @@
     return `${month}월 ${Math.ceil(day / 7)}주차`;
   }
 
-  // 년도/월/광고상품유형/품목 슬라이서 선택 상태에 이 행(날짜+상품구분+품목)이
+  // 년도/월/주차/광고상품유형/품목 슬라이서 선택 상태에 이 행(날짜+상품구분+품목)이
   // 걸리는지. 어떤 슬라이서도 선택 안 했으면(빈 Set) 그 기준은 통과시킨다
   // (=전체 보기). 품목은 쿠팡 전용이라 네이버에서는 itemCategory가 항상
   // null이고, 네이버 쪽 itemCategories 슬라이서도 항상 비어있어 걸리지 않는다.
@@ -389,6 +400,7 @@
     const f = state.filters[platform];
     if (f.years.size && !f.years.has(yearOf(date))) return false;
     if (f.months.size && !f.months.has(monthOf(date))) return false;
+    if (f.weeks.size && !f.weeks.has(weekKeyOf(date))) return false;
     if (f.productTypes.size && !f.productTypes.has(productType)) return false;
     if (f.itemCategories.size && !f.itemCategories.has(itemCategory)) return false;
     return true;
@@ -396,9 +408,13 @@
 
   // 현재 플랫폼에 실제로 존재하는 년도/월/상품구분/품목 목록 (슬라이서 버튼
   // 목록用). 지금 선택된 필터와 무관하게 전체 목록을 보여준다.
+  // 주차는 기간이 길어지면 너무 많아지므로, 년도/월을 골랐으면 그 기간에
+  // 걸치는 주차만 보여준다(이미 선택한 주차는 항상 남겨둔다).
   function computeFilterOptions(platform) {
+    const f = state.filters[platform];
     const years = new Set();
     const months = new Set();
+    const weeks = new Set(f.weeks);
     const productTypes = new Set();
     const itemCategories = new Set();
     for (const row of state.rows) {
@@ -407,6 +423,9 @@
       if (date) {
         years.add(yearOf(date));
         months.add(monthOf(date));
+        if ((!f.years.size || f.years.has(yearOf(date))) && (!f.months.size || f.months.has(monthOf(date)))) {
+          weeks.add(weekKeyOf(date));
+        }
       }
       productTypes.add(row.__productType);
       if (platform === "coupang") {
@@ -416,6 +435,7 @@
     return {
       years: [...years].sort(),
       months: [...months].sort(),
+      weeks: [...weeks].sort(),
       productTypes: [...productTypes].sort(),
       itemCategories: [...itemCategories].sort((a, b) => a.localeCompare(b, "ko")),
     };
@@ -424,6 +444,7 @@
   function formatMetric(value, format) {
     if (value == null || !Number.isFinite(value)) return "-";
     if (format === "pct") return `${value.toLocaleString("ko-KR", { maximumFractionDigits: 2 })}%`;
+    if (format === "pct0") return `${Math.round(value).toLocaleString("ko-KR")}%`;
     if (format === "money") return `${Math.round(value).toLocaleString("ko-KR")}원`;
     return value.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
   }
@@ -654,6 +675,43 @@
   // 하나의 캠페인으로 묶어서 캠페인명만으로는 세부품목을 못 가른다. 실제
   // 광고 소재 단위인 "광고명"에 상품이 그대로 적혀 있어서(예: "...AI 콤보
   // 세탁기...", "...건조기 9kg...") 그 텍스트로 세탁기/건조기를 가른다.
+  // 의류케어 품목 중 아래 광고집행 상품은 세부품목을 상품 단위로 다시 나눈다
+  // (캠페인/VIID 기준 INDEX만으로는 세탁기/건조기/세건패키지를 못 가른다).
+  // 상품명 전체가 같거나, 상품명 다음 칸의 모델코드가 같으면 해당 세부품목.
+  const LAUNDRY_SUBITEM_PRODUCTS = {
+    세탁기: [
+      "삼성전자 그랑데 드럼세탁기 21kg 방문설치,WF21T6000KV,WF21T6000KV,블랙 케비어,블랙 케비어",
+      "삼성전자 그랑데 드럼 세탁기 19kg 방문설치,WF19T6000KW,WF19T6000KW,화이트,화이트",
+      "삼성전자 그랑데 통버블 세탁기 16kg 방문설치,WA16CG6441BY,WA16CG6441BY,라벤더그레이,라벤더그레이",
+    ],
+    건조기: [
+      "삼성전자 AI 건조기 21kg 방문설치,DV21DG8200BV,DV21DG8200BV,블랙캐비어,블랙캐비어",
+    ],
+    세건패키지: [
+      "삼성전자 BESPOKE 그랑데 AI 원바디 Top Fit 세탁기 + 건조기 WF2420HCWWC 24kg + 20kg 방문설치,WF2420HCWWC,WF2420HCWWC,화이트,화이트",
+      "삼성전자 BESPOKE 그랑데 AI 원바디 Top Fit 세탁기 + 건조기 WF2420HCVVC 24kg+20kg 방문설치,WF2420HCVVC,WF2420HCVVC,블랙캐비어,블랙캐비어",
+      "삼성전자 비스포크 그랑데 AI 세탁기 WF21CB6650BW + 건조기 DV17CB6600BW 21kg + 17kg 방문설치,WF21CB6650BW(세탁기) + DV17CB6600BW(건조기),WF21CB6650BW(세탁기) + DV17CB6600BW(건조기),화이트,화이트",
+      "삼성전자 AI 세탁기 WF25DG8250BW + 건조기 DV21DG8200BW 25kg + 21kg + 직렬설치키트 SKK-ATW 세트 방문설치,WF25DG8250BW2T,WF25DG8250BW2T,화이트,화이트",
+    ],
+  };
+  const normalizeProductText = (v) => String(v ?? "").replace(/\s+/g, "").toUpperCase();
+  const LAUNDRY_SUBITEM_BY_NAME = new Map();
+  const LAUNDRY_SUBITEM_BY_MODEL = new Map();
+  for (const [subItem, names] of Object.entries(LAUNDRY_SUBITEM_PRODUCTS)) {
+    for (const name of names) {
+      LAUNDRY_SUBITEM_BY_NAME.set(normalizeProductText(name), subItem);
+      LAUNDRY_SUBITEM_BY_MODEL.set(normalizeProductText(name.split(",")[1]), subItem);
+    }
+  }
+  function laundrySubItemByProduct(execProductName) {
+    const s = String(execProductName ?? "");
+    if (!s) return null;
+    const byName = LAUNDRY_SUBITEM_BY_NAME.get(normalizeProductText(s));
+    if (byName) return byName;
+    const model = s.split(",")[1];
+    return model ? LAUNDRY_SUBITEM_BY_MODEL.get(normalizeProductText(model)) || null : null;
+  }
+
   function refineNcaLaundrySubItem(adName) {
     const s = String(adName ?? "");
     if (!s) return null;
@@ -699,6 +757,11 @@
         if (productType === "NCA" && result.item === "의류케어") {
           const adNameCol = resolveField(fp, platform, "adName");
           const refined = refineNcaLaundrySubItem(adNameCol ? row[adNameCol] : null);
+          if (refined) return { item: result.item, subItem: refined };
+        }
+        if (result.item === "의류케어") {
+          const execCol = resolveField(fp, platform, "execProductName");
+          const refined = laundrySubItemByProduct(execCol ? row[execCol] : null);
           if (refined) return { item: result.item, subItem: refined };
         }
         return result;
@@ -1025,7 +1088,10 @@
       const week = weekOf(date);
       accumulateRow(groups, week.key, { weekKey: week.key, weekLabel: week.label }, row, fp, platform);
     }
-    return finalizeGroups(groups).sort((a, b) => a.weekKey.localeCompare(b.weekKey));
+    // 최근 2개 주차만 보여준다(그 둘의 증감율을 맨 아래 줄에 붙임).
+    return finalizeGroups(groups)
+      .sort((a, b) => a.weekKey.localeCompare(b.weekKey))
+      .slice(-2);
   }
 
   // 표4. 상품구분+상품명 기준 합산 후 전환매출 상위 10개
@@ -1058,6 +1124,7 @@
     renderTabs();
     renderFileNotice();
     renderSlicers();
+    renderDailyChart();
     renderTable1();
     renderTable2();
     renderTable3();
@@ -1103,6 +1170,7 @@
     const f = state.filters[platform];
     renderSlicerGroup("yearSlicer", options.years, f.years, (y) => `${y}년`);
     renderSlicerGroup("monthSlicer", options.months, f.months, (m) => `${Number(m)}월`);
+    renderSlicerGroup("weekSlicer", options.weeks, f.weeks, (k) => weekOf(k).label);
     renderSlicerGroup("productTypeSlicer", options.productTypes, f.productTypes);
     renderSlicerGroup("itemCategorySlicer", options.itemCategories, f.itemCategories);
   }
@@ -1188,14 +1256,15 @@
 
   // 표3 맨 아래에 최근 주차 2개의 증감율(%)을 한 줄 추가한다. 공식 예:
   // 2주차/1주차-1 (최신 주 값 / 그 전 주 값 - 1). 주차가 2개 미만이면 생략.
+  // 증가는 빨간색(▲), 하락은 파란색(▼).
   function appendWeekCompareRow(bodyEl, rows) {
     if (rows.length < 2) return;
     const prev = rows[rows.length - 2];
     const latest = rows[rows.length - 1];
     const tr = document.createElement("tr");
-    tr.style.fontWeight = "700";
+    tr.className = "week-compare-row";
     const labelTd = document.createElement("td");
-    labelTd.textContent = `${prev.weekLabel} → ${latest.weekLabel} 증감율`;
+    labelTd.textContent = "증감율";
     tr.appendChild(labelTd);
     for (const col of METRIC_COLUMNS) {
       const td = document.createElement("td");
@@ -1205,7 +1274,16 @@
         td.textContent = "-";
       } else {
         const pct = (b / a - 1) * 100;
-        td.textContent = `${pct.toLocaleString("ko-KR", { maximumFractionDigits: 2, signDisplay: "exceptZero" })}%`;
+        const text = `${Math.abs(pct).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`;
+        if (pct > 0) {
+          td.textContent = `▲ ${text}`;
+          td.className = "delta-up";
+        } else if (pct < 0) {
+          td.textContent = `▼ ${text}`;
+          td.className = "delta-down";
+        } else {
+          td.textContent = "0%";
+        }
       }
       tr.appendChild(td);
     }
@@ -1222,6 +1300,162 @@
     const rows = computeTable4(state.activePlatform);
     renderMetricTable(el("table4Head"), el("table4Body"), TABLE4_COLS, rows, "판매 데이터가 없습니다.");
   }
+
+  // ---------- 일자별 광고비·매출 그래프 ----------
+  // 지금 필터 기준으로 일자별 광고비(막대)와 전환매출(선)을 그린다. 매출이
+  // 광고비의 수십~수백 배(ROAS 수천~수만%)라 금액 축 하나로는 광고비 막대가
+  // 바닥에 붙어 안 보여서, 왼쪽 축 = 광고비, 오른쪽 축 = 매출로 나누고 두
+  // 축 모두 4칸으로 맞춰 눈금선을 공유한다. 라이브러리 없이 SVG로 직접 그린다.
+  function computeDaily(platform) {
+    const groups = new Map();
+    for (const row of state.rows) {
+      if (row.__platform !== platform) continue;
+      const date = row.__date;
+      if (!date || !passesFilters(platform, date, row.__productType, row.__item)) continue;
+      accumulateRow(groups, date, { date }, row, row.__filePath, platform);
+    }
+    return finalizeGroups(groups).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  // 축 눈금용 짧은 금액 표기 (예: 1.2억, 3,000만)
+  function shortMoney(v) {
+    if (v === 0) return "0";
+    if (Math.abs(v) >= 1e8) return `${(v / 1e8).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}억`;
+    if (Math.abs(v) >= 1e4) return `${Math.round(v / 1e4).toLocaleString("ko-KR")}만`;
+    return Math.round(v).toLocaleString("ko-KR");
+  }
+
+  function niceStep(max, count) {
+    const raw = max / count;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const n = raw / mag;
+    return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * mag;
+  }
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  function svgEl(tag, attrs) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const k of Object.keys(attrs)) node.setAttribute(k, attrs[k]);
+    return node;
+  }
+
+  // 위쪽 두 모서리만 둥근 막대 (바닥은 기준선에 딱 붙임)
+  function barPath(x, y, w, h, r) {
+    const rr = Math.min(r, w / 2, h);
+    return `M${x},${y + h}V${y + rr}Q${x},${y} ${x + rr},${y}H${x + w - rr}Q${x + w},${y} ${x + w},${y + rr}V${y + h}Z`;
+  }
+
+  function renderDailyChart() {
+    const area = el("dailyChart");
+    const tooltip = el("chartTooltip");
+    if (!area) return;
+    const rows = computeDaily(state.activePlatform);
+    area.innerHTML = "";
+    tooltip.hidden = true;
+    if (rows.length === 0) {
+      area.innerHTML = `<div class="empty-state">데이터가 없습니다.</div>`;
+      return;
+    }
+    const width = Math.max(300, area.clientWidth || 800);
+    const height = 280;
+    const m = { top: 26, right: 52, bottom: 28, left: 52 };
+    const plotW = width - m.left - m.right;
+    const plotH = height - m.top - m.bottom;
+    const TICKS = 4;
+    const costStep = niceStep(Math.max(1, ...rows.map((r) => r.cost || 0)), TICKS);
+    const revStep = niceStep(Math.max(1, ...rows.map((r) => r.revenue || 0)), TICKS);
+    const yCost = (v) => m.top + plotH - (v / (costStep * TICKS)) * plotH;
+    const yRev = (v) => m.top + plotH - (v / (revStep * TICKS)) * plotH;
+    const band = plotW / rows.length;
+    const barW = Math.max(2, Math.min(24, band * 0.6));
+    const cx = (i) => m.left + band * i + band / 2;
+
+    const svg = svgEl("svg", { width, height, viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "일자별 광고비와 매출" });
+
+    // 눈금선 + 왼쪽(광고비)/오른쪽(매출) 금액
+    for (let k = 0; k <= TICKS; k++) {
+      const yy = yCost(costStep * k);
+      svg.appendChild(svgEl("line", { x1: m.left, x2: width - m.right, y1: yy, y2: yy, class: k === 0 ? "chart-baseline" : "chart-grid" }));
+      const left = svgEl("text", { x: m.left - 8, y: yy + 4, "text-anchor": "end", class: "chart-axis-label" });
+      left.textContent = shortMoney(costStep * k);
+      svg.appendChild(left);
+      const right = svgEl("text", { x: width - m.right + 8, y: yy + 4, "text-anchor": "start", class: "chart-axis-label" });
+      right.textContent = shortMoney(revStep * k);
+      svg.appendChild(right);
+    }
+    const leftTitle = svgEl("text", { x: m.left - 8, y: 12, "text-anchor": "end", class: "chart-axis-title" });
+    leftTitle.textContent = "광고비";
+    svg.appendChild(leftTitle);
+    const rightTitle = svgEl("text", { x: width - m.right + 8, y: 12, "text-anchor": "start", class: "chart-axis-title" });
+    rightTitle.textContent = "매출";
+    svg.appendChild(rightTitle);
+
+    // x축 날짜 (겹치지 않게 일정 간격으로만 표시)
+    const every = Math.max(1, Math.ceil(44 / band));
+    rows.forEach((r, i) => {
+      if (i % every !== 0) return;
+      const t = svgEl("text", { x: cx(i), y: height - 8, "text-anchor": "middle", class: "chart-axis-label" });
+      t.textContent = `${r.date.slice(5, 7)}.${r.date.slice(8, 10)}`;
+      svg.appendChild(t);
+    });
+
+    // 호버 시 해당 일자 강조 배경
+    const hoverBand = svgEl("rect", { x: 0, y: m.top, width: band, height: plotH, class: "chart-hover-band", visibility: "hidden" });
+    svg.appendChild(hoverBand);
+
+    // 광고비 막대
+    rows.forEach((r, i) => {
+      const v = r.cost || 0;
+      if (v <= 0) return;
+      const top = yCost(v);
+      svg.appendChild(svgEl("path", { d: barPath(cx(i) - barW / 2, top, barW, m.top + plotH - top, 4), class: "chart-bar" }));
+    });
+
+    // 매출 선 + 점
+    const pts = rows.map((r, i) => `${cx(i)},${yRev(r.revenue || 0)}`).join(" ");
+    svg.appendChild(svgEl("polyline", { points: pts, class: "chart-line" }));
+    if (band >= 10) {
+      rows.forEach((r, i) => svg.appendChild(svgEl("circle", { cx: cx(i), cy: yRev(r.revenue || 0), r: 4, class: "chart-dot" })));
+    }
+
+    // 일자별로 넓은 투명 영역을 깔아서 마우스/터치로 값 확인
+    const hit = svgEl("rect", { x: m.left, y: m.top, width: plotW, height: plotH, fill: "transparent" });
+    const showAt = (clientX) => {
+      const box = svg.getBoundingClientRect();
+      const i = Math.min(rows.length - 1, Math.max(0, Math.floor((clientX - box.left - m.left) / band)));
+      const r = rows[i];
+      hoverBand.setAttribute("x", m.left + band * i);
+      hoverBand.setAttribute("visibility", "visible");
+      tooltip.innerHTML =
+        `<div class="tt-title">${r.date.replace(/-/g, ".")}</div>` +
+        `<div><span class="tt-swatch tt-bar"></span>광고비 <b>${formatMetric(r.cost, "money")}</b></div>` +
+        `<div><span class="tt-swatch tt-line"></span>매출 <b>${formatMetric(r.revenue, "money")}</b></div>` +
+        `<div class="tt-muted">ROAS ${formatMetric(r.roas, "pct0")}</div>`;
+      tooltip.hidden = false;
+      const areaBox = area.getBoundingClientRect();
+      const x = cx(i);
+      const tw = tooltip.offsetWidth;
+      const left = x + 12 + tw > width ? x - 12 - tw : x + 12;
+      tooltip.style.left = `${Math.max(0, left) + (box.left - areaBox.left)}px`;
+      tooltip.style.top = `${m.top}px`;
+    };
+    hit.addEventListener("pointermove", (e) => showAt(e.clientX));
+    hit.addEventListener("pointerdown", (e) => showAt(e.clientX));
+    hit.addEventListener("pointerleave", () => {
+      hoverBand.setAttribute("visibility", "hidden");
+      tooltip.hidden = true;
+    });
+    svg.appendChild(hit);
+    area.appendChild(svg);
+  }
+
+  let chartResizeTimer = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(chartResizeTimer);
+    chartResizeTimer = setTimeout(() => {
+      if (state.rows.length) renderDailyChart();
+    }, 150);
+  });
 
   // ---------- 이벤트 ----------
 
@@ -2053,5 +2287,60 @@
   });
   applyStoredTheme();
 
-  loadManifest();
+  // ---------- 접속 비밀번호 ----------
+  // 비밀번호 원문은 어디에도 두지 않고 SHA-256 해시값만 둔다. 입력값을 같은
+  // 방식으로 해시해서 비교하고, 맞으면 그때 데이터를 불러온다. 한 번 맞히면
+  // 같은 탭에서는(새로고침 포함) 다시 묻지 않는다.
+  const PASSWORD_SHA256 = "dd0a3d18a5b7de33fb11906a12a10b1d3dca8fe42e99a2b76ec6e56d926c3513";
+  const UNLOCK_KEY = "dashboardUnlocked";
+
+  async function sha256Hex(text) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  function unlockDashboard() {
+    document.body.classList.remove("locked");
+    el("lockScreen").hidden = true;
+    loadManifest();
+  }
+
+  let alreadyUnlocked = false;
+  try {
+    alreadyUnlocked = sessionStorage.getItem(UNLOCK_KEY) === PASSWORD_SHA256;
+  } catch (e) {
+    /* 저장소를 못 쓰면 매번 묻는다 */
+  }
+  if (alreadyUnlocked) {
+    unlockDashboard();
+  } else {
+    const input = el("lockPassword");
+    const error = el("lockError");
+    el("lockForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      error.hidden = true;
+      let hash = "";
+      try {
+        hash = await sha256Hex(input.value);
+      } catch (err) {
+        error.textContent = "이 브라우저에서는 확인할 수 없습니다. https 주소로 접속해 주세요.";
+        error.hidden = false;
+        return;
+      }
+      if (hash !== PASSWORD_SHA256) {
+        error.textContent = "비밀번호가 맞지 않습니다.";
+        error.hidden = false;
+        input.value = "";
+        input.focus();
+        return;
+      }
+      try {
+        sessionStorage.setItem(UNLOCK_KEY, PASSWORD_SHA256);
+      } catch (err) {
+        /* 저장 실패해도 이번 접속은 그대로 열린다 */
+      }
+      unlockDashboard();
+    });
+    input.focus();
+  }
 })();
