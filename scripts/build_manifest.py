@@ -12,9 +12,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 INDEX_DIR = ROOT / "INDEX"
+REPORT_FORM_DIR = ROOT / "리포트양식"
 PLATFORMS = ["coupang", "naver"]
 PATTERNS = ["*.csv", "*.xlsx", "*.xls"]
 INDEX_PATTERNS = ["*.xlsb", "*.xlsx", "*.xls"]
+REPORT_FORM_PATTERNS = ["*.xlsb", "*.xlsx", "*.xls"]
 
 
 def collect(dir_path, patterns):
@@ -51,12 +53,34 @@ def build():
             }
         )
 
+    # 리포트양식/ 폴더: 다운로드 버튼이 참고하는 양식 파일들. 예를 들어
+    # 네이버 GFA 양식은 캠페인ID/상품코드 -> 품목구분 조회표를 담고 있어서
+    # "GFA리포트RAW 다운받기" 버튼이 이 폴더에서 파일명 기준 최신 파일을
+    # 읽어 품목명을 채운다.
+    report_form_files = []
+    for data_path in collect(REPORT_FORM_DIR, REPORT_FORM_PATTERNS):
+        report_form_files.append(
+            {
+                "name": data_path.name,
+                "path": data_path.relative_to(ROOT).as_posix(),
+                "size": data_path.stat().st_size,
+            }
+        )
+
     manifest_path = DATA_DIR / "manifest.json"
     manifest_path.write_text(
-        json.dumps({"files": files, "indexFiles": index_files}, ensure_ascii=False, indent=2) + "\n",
+        json.dumps(
+            {"files": files, "indexFiles": index_files, "reportFormFiles": report_form_files},
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
-    print(f"Wrote {manifest_path} with {len(files)} file(s), {len(index_files)} index file(s).")
+    print(
+        f"Wrote {manifest_path} with {len(files)} file(s), "
+        f"{len(index_files)} index file(s), {len(report_form_files)} report form file(s)."
+    )
 
 
 if __name__ == "__main__":
