@@ -139,12 +139,18 @@
     { key: "weekLabel", label: "주차" },
     ...METRIC_COLUMNS,
   ];
-  const TABLE4_COLS = [
-    { key: "rank", label: "순위" },
-    { key: "productType", label: "상품구분" },
-    { key: "productName", label: "상품명" },
-    ...METRIC_COLUMNS,
-  ];
+  // 상품명은 30자까지만 보여주고(넘으면 "…", 마우스를 올리면 전체 이름),
+  // 쿠팡은 상품의 VIID(옵션ID)도 함께 보여준다.
+  const PRODUCT_NAME_MAX = 30;
+  function table4ColsFor(platform) {
+    return [
+      { key: "rank", label: "순위" },
+      { key: "productType", label: "상품구분" },
+      { key: "productName", label: "상품명", maxLen: PRODUCT_NAME_MAX },
+      ...(platform === "coupang" ? [{ key: "viid", label: "VIID" }] : []),
+      ...METRIC_COLUMNS,
+    ];
+  }
 
   const state = {
     manifest: { files: [] },
@@ -167,8 +173,8 @@
     table1Page: 1,
     // 슬라이서 선택 상태 - 플랫폼(탭)마다 따로 기억한다(탭을 바꿔도 유지됨).
     filters: {
-      coupang: { years: new Set(), months: new Set(), weeks: new Set(), productTypes: new Set(), itemCategories: new Set() },
-      naver: { years: new Set(), months: new Set(), weeks: new Set(), productTypes: new Set(), itemCategories: new Set() },
+      coupang: { years: new Set(), months: new Set(), weeks: new Set(), divisions: new Set(), productTypes: new Set(), itemCategories: new Set(), subItems: new Set() },
+      naver: { years: new Set(), months: new Set(), weeks: new Set(), divisions: new Set(), productTypes: new Set(), itemCategories: new Set(), subItems: new Set() },
     },
   };
 
@@ -417,52 +423,76 @@
     return `${month}월 ${Math.ceil(day / 7)}주차`;
   }
 
-  // 년도/월/주차/광고상품유형/품목 슬라이서 선택 상태에 이 행(날짜+상품구분+품목)이
-  // 걸리는지. 어떤 슬라이서도 선택 안 했으면(빈 Set) 그 기준은 통과시킨다
-  // (=전체 보기). 품목은 쿠팡 전용이라 네이버에서는 itemCategory가 항상
-  // null이고, 네이버 쪽 itemCategories 슬라이서도 항상 비어있어 걸리지 않는다.
-  function passesFilters(platform, date, productType, itemCategory) {
+  // 년도/월/주차/구분(CE·MX)/광고상품유형/품목/상세 품목 슬라이서 선택 상태에
+  // 이 행이 걸리는지. 어떤 슬라이서도 선택 안 했으면(빈 Set) 그 기준은
+  // 통과시킨다(=전체 보기). 구분/품목/상세 품목은 쿠팡 전용이라 네이버에서는
+  // 값이 항상 null이고, 네이버 쪽 슬라이서도 항상 비어있어 걸리지 않는다.
+  // skip에 기준 이름을 주면 그 기준만 빼고 검사한다(필터 버튼 목록 계산용).
+  function passesFilters(platform, date, productType, itemCategory, subItem, skip) {
     const f = state.filters[platform];
-    if (f.years.size && !f.years.has(yearOf(date))) return false;
-    if (f.months.size && !f.months.has(monthOf(date))) return false;
-    if (f.weeks.size && !f.weeks.has(weekKeyOf(date))) return false;
-    if (f.productTypes.size && !f.productTypes.has(productType)) return false;
-    if (f.itemCategories.size && !f.itemCategories.has(itemCategory)) return false;
+    if (skip !== "years" && f.years.size && !f.years.has(yearOf(date))) return false;
+    if (skip !== "months" && f.months.size && !f.months.has(monthOf(date))) return false;
+    if (skip !== "weeks" && f.weeks.size && !f.weeks.has(weekKeyOf(date))) return false;
+    if (skip !== "divisions" && f.divisions.size && !f.divisions.has(classifyDivision(itemCategory))) return false;
+    if (skip !== "productTypes" && f.productTypes.size && !f.productTypes.has(productType)) return false;
+    if (skip !== "itemCategories" && f.itemCategories.size && !f.itemCategories.has(itemCategory)) return false;
+    if (skip !== "subItems" && f.subItems.size && !f.subItems.has(subItem)) return false;
     return true;
   }
 
-  // 현재 플랫폼에 실제로 존재하는 년도/월/상품구분/품목 목록 (슬라이서 버튼
-  // 목록用). 지금 선택된 필터와 무관하게 전체 목록을 보여준다.
-  // 주차는 기간이 길어지면 너무 많아지므로, 년도/월을 골랐으면 그 기간에
-  // 걸치는 주차만 보여준다(이미 선택한 주차는 항상 남겨둔다).
+  // 필터 버튼 목록. 각 기준의 버튼은 "나머지 기준들"을 모두 통과하는 데이터가
+  // 있는 값만 보여준다(예: PA를 고르면 PA 데이터가 있는 품목만 남음). 이미
+  // 선택한 값은 데이터가 없어져도 다시 끌 수 있게 항상 남겨둔다.
+  // 상세 품목은 품목을 하나 이상 골랐을 때만, 고른 품목의 상세 품목만 보여준다.
+  const FILTER_DIMENSIONS = ["years", "months", "weeks", "divisions", "productTypes", "itemCategories", "subItems"];
+
   function computeFilterOptions(platform) {
     const f = state.filters[platform];
-    const years = new Set();
-    const months = new Set();
-    const weeks = new Set(f.weeks);
-    const productTypes = new Set();
-    const itemCategories = new Set();
+    // 품목 선택이 바뀌어 더 이상 해당 없는 상세 품목 선택은 지운다(안 보이는
+    // 필터가 계속 걸려 있지 않도록).
+    if (!f.itemCategories.size) f.subItems.clear();
+    const opts = {};
+    for (const dim of FILTER_DIMENSIONS) opts[dim] = new Set(f[dim]);
+    const subItemsOfSelected = new Set();
     for (const row of state.rows) {
       if (row.__platform !== platform) continue;
       const date = row.__date;
-      if (date) {
-        years.add(yearOf(date));
-        months.add(monthOf(date));
-        if ((!f.years.size || f.years.has(yearOf(date))) && (!f.months.size || f.months.has(monthOf(date)))) {
-          weeks.add(weekKeyOf(date));
-        }
-      }
-      productTypes.add(row.__productType);
-      if (platform === "coupang") {
-        itemCategories.add(row.__item);
+      if (!date) continue;
+      const item = row.__item;
+      const subItem = row.__subItem;
+      const division = classifyDivision(item);
+      const values = {
+        years: yearOf(date),
+        months: monthOf(date),
+        weeks: weekKeyOf(date),
+        divisions: division,
+        productTypes: row.__productType,
+        itemCategories: platform === "coupang" ? item : null,
+        subItems: platform === "coupang" ? subItem : null,
+      };
+      if (platform === "coupang" && f.itemCategories.has(item) && subItem) subItemsOfSelected.add(subItem);
+      for (const dim of FILTER_DIMENSIONS) {
+        const v = values[dim];
+        if (v == null || opts[dim].has(v)) continue;
+        if (dim === "subItems" && !f.itemCategories.has(item)) continue;
+        if (passesFilters(platform, date, row.__productType, item, subItem, dim)) opts[dim].add(v);
       }
     }
+    for (const v of [...f.subItems]) {
+      if (!subItemsOfSelected.has(v)) {
+        f.subItems.delete(v);
+        opts.subItems.delete(v);
+      }
+    }
+    const ko = (a, b) => a.localeCompare(b, "ko");
     return {
-      years: [...years].sort(),
-      months: [...months].sort(),
-      weeks: [...weeks].sort(),
-      productTypes: [...productTypes].sort(),
-      itemCategories: [...itemCategories].sort((a, b) => a.localeCompare(b, "ko")),
+      years: [...opts.years].sort(),
+      months: [...opts.months].sort(),
+      weeks: [...opts.weeks].sort(),
+      divisions: [...opts.divisions].sort(),
+      productTypes: [...opts.productTypes].sort(),
+      itemCategories: [...opts.itemCategories].sort(ko),
+      subItems: [...opts.subItems].sort(ko),
     };
   }
 
@@ -881,6 +911,7 @@
       execProductName: resolveFieldForCols(cols, platform, "execProductName"),
     };
     const soldProductCol = cols.has("광고전환매출발생 상품명") ? "광고전환매출발생 상품명" : null;
+    const soldOptionCol = cols.has("광고전환매출발생 옵션ID") ? "광고전환매출발생 옵션ID" : null;
     const metricCols = {};
     for (const f of DASHBOARD_METRIC_FIELDS) metricCols[f] = resolveFieldForCols(cols, platform, f);
     const groups = new Map();
@@ -889,6 +920,7 @@
         row.__date,
         ...Object.values(keyCols).map((c) => (c ? row[c] : "")),
         soldProductCol ? row[soldProductCol] : "",
+        soldOptionCol ? row[soldOptionCol] : "",
       ].join("\u0001");
       let g = groups.get(key);
       if (!g) {
@@ -906,6 +938,7 @@
           if (col) g[col] = row[col];
         }
         if (soldProductCol) g[soldProductCol] = row[soldProductCol];
+        if (soldOptionCol) g[soldOptionCol] = row[soldOptionCol];
         groups.set(key, g);
       }
       for (const f of DASHBOARD_METRIC_FIELDS) {
@@ -1095,7 +1128,7 @@
       const date = row.__date;
       const productType = row.__productType;
       const itemCategory = row.__item;
-      if (!date || !passesFilters(platform, date, productType, itemCategory)) continue;
+      if (!date || !passesFilters(platform, date, productType, itemCategory, row.__subItem)) continue;
       if (platform === "coupang") {
         accumulateRow(groups, itemCategory, { itemCategory }, row, fp, platform);
       } else {
@@ -1123,7 +1156,7 @@
       const date = row.__date;
       const productType = row.__productType;
       const itemCategory = row.__item;
-      if (!date || !passesFilters(platform, date, productType, itemCategory)) continue;
+      if (!date || !passesFilters(platform, date, productType, itemCategory, row.__subItem)) continue;
       accumulateRow(groups, productType, { productType }, row, fp, platform);
     }
     return finalizeGroups(groups).sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
@@ -1138,7 +1171,7 @@
       const date = row.__date;
       const productType = row.__productType;
       const itemCategory = row.__item;
-      if (!date || !passesFilters(platform, date, productType, itemCategory)) continue;
+      if (!date || !passesFilters(platform, date, productType, itemCategory, row.__subItem)) continue;
       const week = weekOf(date);
       accumulateRow(groups, week.key, { weekKey: week.key, weekLabel: week.label }, row, fp, platform);
     }
@@ -1158,19 +1191,38 @@
       const date = row.__date;
       const productType = row.__productType;
       const itemCategory = row.__item;
-      if (!date || !passesFilters(platform, date, productType, itemCategory)) continue;
+      if (!date || !passesFilters(platform, date, productType, itemCategory, row.__subItem)) continue;
       const campaignCol = resolveField(fp, platform, "campaign");
       const groupCol = resolveField(fp, platform, "group");
       const campaign = campaignCol ? row[campaignCol] ?? "" : "";
       const group = groupCol ? row[groupCol] ?? "" : "";
       const productName = resolveProductLabel(row, fp, platform, productType, campaign, group);
       const key = `${productType}\u0001${productName}`;
-      accumulateRow(groups, key, { productType, productName }, row, fp, platform);
+      accumulateRow(groups, key, { productType, productName, viids: new Set() }, row, fp, platform);
+      if (platform === "coupang") {
+        const viid = productViid(row, fp, productType);
+        if (viid) groups.get(key).viids.add(viid);
+      }
     }
-    return finalizeGroups(groups)
-      .sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
-      .slice(0, 10)
-      .map((r, i) => ({ ...r, rank: i + 1 }));
+    const all = finalizeGroups(groups).sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+    // 원그래프의 "기타"와 비중 계산용 - 필터에 걸린 전체 상품의 매출 합계
+    const totalRevenue = all.reduce((sum, r) => sum + (r.revenue || 0), 0);
+    const rows = all.slice(0, 10).map((r, i) => {
+      const ids = [...r.viids];
+      return { ...r, rank: i + 1, viid: ids.length ? ids[0] + (ids.length > 1 ? ` 외 ${ids.length - 1}` : "") : "-" };
+    });
+    return { rows, totalRevenue };
+  }
+
+  // TOP10 상품의 VIID: PA는 판매된 상품(광고전환매출발생 상품명)의 옵션ID,
+  // 그 외(BPA 등)는 광고집행 옵션ID. NCA처럼 둘 다 없으면 null.
+  function productViid(row, fp, productType) {
+    const cols = state.colsByFile.get(fp);
+    if (productType === "PA" && cols && cols.has("광고전환매출발생 옵션ID")) {
+      return normalizeId(row["광고전환매출발생 옵션ID"]) || null;
+    }
+    const viidCol = resolveField(fp, "coupang", "viid");
+    return viidCol ? normalizeId(row[viidCol]) || null : null;
   }
 
   // ---------- 렌더링 ----------
@@ -1231,8 +1283,12 @@
       const i = [...btn.parentNode.children].indexOf(btn);
       btn.title = weekOf(options.weeks[i]).label;
     }
+    renderSlicerGroup("divisionSlicer", options.divisions, f.divisions);
     renderSlicerGroup("productTypeSlicer", options.productTypes, f.productTypes);
     renderSlicerGroup("itemCategorySlicer", options.itemCategories, f.itemCategories);
+    // 상세 품목은 품목을 골랐을 때만 나타난다.
+    el("subItemFilterGroup").hidden = !f.itemCategories.size;
+    renderSlicerGroup("subItemSlicer", options.subItems, f.subItems);
   }
 
   function formatSize(bytes) {
@@ -1259,14 +1315,42 @@
       .join("");
   }
 
+  const TEXT_COLUMN_KEYS = new Set(["rank", "productType", "productName", "viid", "campaign", "group", "weekLabel", "itemCategory"]);
+
   function cellText(row, col) {
-    if (col.key === "rank" || col.key === "productType" || col.key === "productName" || col.key === "campaign" || col.key === "group" || col.key === "weekLabel" || col.key === "itemCategory") {
+    if (TEXT_COLUMN_KEYS.has(col.key)) {
       return row[col.key] ?? "";
     }
     return formatMetric(row[col.key], col.format);
   }
 
-  function renderMetricTable(headEl, bodyEl, columns, rows, emptyMessage) {
+  // 표에 보이는 행들의 합계(광고비/노출/클릭/전환수/전환매출은 더하고,
+  // CTR/CPC/CVR/객단가/ROAS는 그 합계로 다시 계산).
+  function totalOf(rows) {
+    const t = { cost: 0, impressions: 0, clicks: 0, conversions: 0, revenue: 0 };
+    for (const r of rows) {
+      for (const k of Object.keys(t)) if (Number.isFinite(r[k])) t[k] += r[k];
+    }
+    return finalizeGroups(new Map([["total", t]]))[0];
+  }
+
+  // 표 맨 위(컬럼 이름 바로 아래)에 붙는 합계 행
+  function appendTotalRow(bodyEl, columns, rows) {
+    const total = totalOf(rows);
+    const tr = document.createElement("tr");
+    tr.className = "total-row";
+    columns.forEach((col, i) => {
+      const td = document.createElement("td");
+      if (i === 0) td.textContent = "합계";
+      else if (!TEXT_COLUMN_KEYS.has(col.key)) td.textContent = formatMetric(total[col.key], col.format);
+      tr.appendChild(td);
+    });
+    bodyEl.appendChild(tr);
+  }
+
+  // options.totalRows: 합계에 쓸 행(없으면 rows). options.decorate(td, row, col):
+  // 칸을 꾸밀 때(예: 순위 옆 색 표시).
+  function renderMetricTable(headEl, bodyEl, columns, rows, emptyMessage, options = {}) {
     headEl.innerHTML = "";
     const tr = document.createElement("tr");
     for (const col of columns) {
@@ -1287,11 +1371,19 @@
       bodyEl.appendChild(tr2);
       return;
     }
+    appendTotalRow(bodyEl, columns, options.totalRows || rows);
     for (const row of rows) {
       const tr2 = document.createElement("tr");
       for (const col of columns) {
         const td = document.createElement("td");
-        td.textContent = cellText(row, col);
+        const text = String(cellText(row, col));
+        if (col.maxLen && text.length > col.maxLen) {
+          td.textContent = `${text.slice(0, col.maxLen)}…`;
+          td.title = text;
+        } else {
+          td.textContent = text;
+        }
+        if (options.decorate) options.decorate(td, row, col);
         tr2.appendChild(td);
       }
       bodyEl.appendChild(tr2);
@@ -1304,7 +1396,7 @@
     const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
     state.table1Page = Math.min(Math.max(1, state.table1Page), totalPages);
     const pageRows = rows.slice((state.table1Page - 1) * PAGE_SIZE, state.table1Page * PAGE_SIZE);
-    renderMetricTable(el("table1Head"), el("table1Body"), table1ColsFor(state.activePlatform), pageRows, "데이터가 없습니다.");
+    renderMetricTable(el("table1Head"), el("table1Body"), table1ColsFor(state.activePlatform), pageRows, "데이터가 없습니다.", { totalRows: rows });
     el("table1PageInfo").textContent = `총 ${rows.length.toLocaleString("ko-KR")}행 · ${state.table1Page} / ${totalPages} 페이지`;
     el("table1PrevBtn").disabled = state.table1Page <= 1;
     el("table1NextBtn").disabled = state.table1Page >= totalPages;
@@ -1357,9 +1449,82 @@
     appendWeekCompareRow(el("table3Body"), rows);
   }
 
+  // 원그래프 조각 색: 순위가 높을수록 진한 한 가지 색(보라) 계열, 기타는 회색.
+  function rankColor(i) {
+    return `color-mix(in oklab, var(--chart-bar) ${100 - i * 6}%, var(--surface-1))`;
+  }
+
   function renderTable4() {
-    const rows = computeTable4(state.activePlatform);
-    renderMetricTable(el("table4Head"), el("table4Body"), TABLE4_COLS, rows, "판매 데이터가 없습니다.");
+    const platform = state.activePlatform;
+    const { rows, totalRevenue } = computeTable4(platform);
+    renderMetricTable(el("table4Head"), el("table4Body"), table4ColsFor(platform), rows, "판매 데이터가 없습니다.", {
+      decorate: (td, row, col) => {
+        if (col.key !== "rank") return;
+        const sw = document.createElement("span");
+        sw.className = "rank-swatch";
+        sw.style.background = rankColor(row.rank - 1);
+        td.prepend(sw);
+      },
+    });
+    renderTop10Pie(rows, totalRevenue);
+  }
+
+  // 판매 우수 상품 TOP 10의 매출 비중 원그래프(도넛). 비중 = 각 상품 매출 /
+  // 필터에 걸린 전체 상품 매출. TOP 10 밖의 매출은 "기타"(회색)로 묶는다.
+  function renderTop10Pie(rows, totalRevenue) {
+    const area = el("top10Pie");
+    const legend = el("top10PieLegend");
+    const tooltip = el("top10PieTooltip");
+    area.innerHTML = "";
+    legend.innerHTML = "";
+    tooltip.hidden = true;
+    if (!rows.length || !(totalRevenue > 0)) {
+      area.innerHTML = `<div class="empty-state">데이터가 없습니다.</div>`;
+      return;
+    }
+    const top = rows.reduce((sum, r) => sum + (r.revenue || 0), 0);
+    const slices = rows.map((r, i) => ({ label: `${r.rank}위 ${r.productName}`, value: r.revenue || 0, color: rankColor(i), rank: r.rank }));
+    if (totalRevenue - top > 0) slices.push({ label: "기타 (TOP 10 외)", value: totalRevenue - top, color: "var(--pie-other)", rank: null });
+    const size = 220;
+    const R = size / 2 - 4;
+    const r0 = R * 0.6;
+    const c = size / 2;
+    const svg = svgEl("svg", { width: size, height: size, viewBox: `0 0 ${size} ${size}`, role: "img", "aria-label": "TOP 10 상품 매출 비중" });
+    let angle = -Math.PI / 2;
+    const pt = (rad, a) => `${c + rad * Math.cos(a)},${c + rad * Math.sin(a)}`;
+    const pct = (v) => `${((v / totalRevenue) * 100).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%`;
+    for (const sl of slices) {
+      const sweep = (sl.value / totalRevenue) * Math.PI * 2;
+      if (sweep <= 0) continue;
+      const a1 = angle + Math.min(sweep, Math.PI * 2 - 1e-4);
+      const large = sweep > Math.PI ? 1 : 0;
+      const d = `M${pt(R, angle)}A${R},${R} 0 ${large} 1 ${pt(R, a1)}L${pt(r0, a1)}A${r0},${r0} 0 ${large} 0 ${pt(r0, angle)}Z`;
+      const path = svgEl("path", { d, class: "pie-slice" });
+      path.style.fill = sl.color;
+      const show = (e) => {
+        tooltip.innerHTML = `<div class="tt-title">${escapeHtml(sl.label.length > 34 ? sl.label.slice(0, 34) + "…" : sl.label)}</div>` +
+          `<div>매출 <b>${formatMetric(sl.value, "money")}</b></div><div class="tt-muted">비중 ${pct(sl.value)}</div>`;
+        tooltip.hidden = false;
+        const box = area.getBoundingClientRect();
+        tooltip.style.left = `${Math.min(e.clientX - box.left + 12, box.width - tooltip.offsetWidth)}px`;
+        tooltip.style.top = `${e.clientY - box.top + 12}px`;
+      };
+      path.addEventListener("pointermove", show);
+      path.addEventListener("pointerdown", show);
+      path.addEventListener("pointerleave", () => (tooltip.hidden = true));
+      svg.appendChild(path);
+      angle += sweep;
+    }
+    const t1 = svgEl("text", { x: c, y: c - 6, "text-anchor": "middle", class: "pie-center-label" });
+    t1.textContent = "TOP 10 비중";
+    const t2 = svgEl("text", { x: c, y: c + 18, "text-anchor": "middle", class: "pie-center-value" });
+    t2.textContent = pct(top);
+    svg.appendChild(t1);
+    svg.appendChild(t2);
+    area.appendChild(svg);
+    legend.innerHTML = slices
+      .map((sl) => `<li><span class="rank-swatch" style="background:${sl.color}"></span><span class="legend-name">${sl.rank ? `${sl.rank}위` : "기타"}</span><span class="legend-pct">${pct(sl.value)}</span></li>`)
+      .join("");
   }
 
   // ---------- 일자별 광고비·ROAS 그래프 ----------
@@ -1371,7 +1536,7 @@
     for (const row of state.rows) {
       if (row.__platform !== platform) continue;
       const date = row.__date;
-      if (!date || !passesFilters(platform, date, row.__productType, row.__item)) continue;
+      if (!date || !passesFilters(platform, date, row.__productType, row.__item, row.__subItem)) continue;
       accumulateRow(groups, date, { date }, row, row.__filePath, platform);
     }
     return finalizeGroups(groups).sort((a, b) => a.date.localeCompare(b.date));
@@ -1425,7 +1590,7 @@
     // 축 숫자가 잘리지 않게, 가장 긴 눈금 글자 길이만큼 좌우 여백을 잡는다.
     const labelW = (text) => 12 + String(text).length * 7;
     const m = {
-      top: 26,
+      top: 44,
       right: Math.max(44, labelW(roasLabel(roasStep * TICKS))),
       bottom: 28,
       left: Math.max(44, labelW(shortMoney(costStep * TICKS))),
@@ -1438,7 +1603,25 @@
     const barW = Math.max(2, Math.min(24, band * 0.6));
     const cx = (i) => m.left + band * i + band / 2;
 
-    const svg = svgEl("svg", { width, height, viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "일자별 광고비와 ROAS" });
+    const svg = svgEl("svg", { width, height, viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "일자별 광고비와 ROAS 추이" });
+
+    // 막대는 위에서 아래로 옅어지는 보라, ROAS 선 아래는 은은한 민트 음영
+    const defs = svgEl("defs", {});
+    const grad = (id, color, from, to) => {
+      const g = svgEl("linearGradient", { id, x1: 0, y1: 0, x2: 0, y2: 1 });
+      const s1 = svgEl("stop", { offset: "0%" });
+      s1.style.stopColor = `var(${color})`;
+      s1.style.stopOpacity = from;
+      const s2 = svgEl("stop", { offset: "100%" });
+      s2.style.stopColor = `var(${color})`;
+      s2.style.stopOpacity = to;
+      g.appendChild(s1);
+      g.appendChild(s2);
+      defs.appendChild(g);
+    };
+    grad("dailyBarGrad", "--chart-bar", 1, 0.55);
+    grad("dailyAreaGrad", "--chart-line", 0.22, 0);
+    svg.appendChild(defs);
 
     // 눈금선 + 왼쪽(광고비 금액)/오른쪽(ROAS %)
     for (let k = 0; k <= TICKS; k++) {
@@ -1467,6 +1650,27 @@
       svg.appendChild(t);
     });
 
+    // 주차 구분 점선 + 주차 이름 (월요일이 시작되는 곳마다)
+    const weekKeys = [...new Set(rows.map((r) => weekKeyOf(r.date)))];
+    const weekName = weekNameFormatter(weekKeys);
+    let segStart = 0;
+    const weekLabel = (from, to) => {
+      const x1 = m.left + band * from;
+      const x2 = m.left + band * to;
+      if (x2 - x1 < 32) return; // 이름이 안 들어갈 만큼 짧은 주(데이터 1~2일)는 생략
+      const t = svgEl("text", { x: (x1 + x2) / 2, y: m.top - 10, "text-anchor": "middle", class: "chart-week-label" });
+      t.textContent = weekName(weekKeyOf(rows[from].date));
+      svg.appendChild(t);
+    };
+    rows.forEach((r, i) => {
+      if (i === 0 || weekKeyOf(r.date) === weekKeyOf(rows[i - 1].date)) return;
+      const x = m.left + band * i;
+      svg.appendChild(svgEl("line", { x1: x, x2: x, y1: m.top - 22, y2: m.top + plotH, class: "chart-week-sep" }));
+      weekLabel(segStart, i);
+      segStart = i;
+    });
+    weekLabel(segStart, rows.length);
+
     // 호버 시 해당 일자 강조 배경
     const hoverBand = svgEl("rect", { x: 0, y: m.top, width: band, height: plotH, class: "chart-hover-band", visibility: "hidden" });
     svg.appendChild(hoverBand);
@@ -1476,13 +1680,19 @@
       const v = r.cost || 0;
       if (v <= 0) return;
       const top = yCost(v);
-      svg.appendChild(svgEl("path", { d: barPath(cx(i) - barW / 2, top, barW, m.top + plotH - top, 4), class: "chart-bar" }));
+      svg.appendChild(svgEl("path", { d: barPath(cx(i) - barW / 2, top, barW, m.top + plotH - top, 4), class: "chart-bar", fill: "url(#dailyBarGrad)" }));
     });
 
-    // ROAS 선 + 점 (광고비가 0인 날은 ROAS가 없어서 선을 끊는다)
+    // ROAS 선 + 아래 음영 + 점 (광고비가 0인 날은 ROAS가 없어서 선을 끊는다)
+    const baseY = m.top + plotH;
     let run = [];
     const flush = () => {
-      if (run.length > 1) svg.appendChild(svgEl("polyline", { points: run.join(" "), class: "chart-line" }));
+      if (run.length > 1) {
+        const firstX = run[0].split(",")[0];
+        const lastX = run[run.length - 1].split(",")[0];
+        svg.appendChild(svgEl("path", { d: `M${firstX},${baseY}L${run.join("L")}L${lastX},${baseY}Z`, fill: "url(#dailyAreaGrad)" }));
+        svg.appendChild(svgEl("polyline", { points: run.join(" "), class: "chart-line" }));
+      }
       run = [];
     };
     rows.forEach((r, i) => {
@@ -1505,7 +1715,7 @@
       hoverBand.setAttribute("x", m.left + band * i);
       hoverBand.setAttribute("visibility", "visible");
       tooltip.innerHTML =
-        `<div class="tt-title">${r.date.replace(/-/g, ".")}</div>` +
+        `<div class="tt-title">${r.date.replace(/-/g, ".")} · ${weekName(weekKeyOf(r.date))}</div>` +
         `<div><span class="tt-swatch tt-bar"></span>광고비 <b>${formatMetric(r.cost, "money")}</b></div>` +
         `<div><span class="tt-swatch tt-line"></span>ROAS <b>${formatMetric(r.roas, "pct0")}</b></div>`;
       tooltip.hidden = false;
@@ -1590,7 +1800,7 @@
     const item = row.__item;
     const subItem = row.__subItem;
     const division = classifyDivision(item);
-    if (!division || !passesFilters(platform, date, productType, item)) return null;
+    if (!division || !passesFilters(platform, date, productType, item, row.__subItem)) return null;
     return {
       division,
       values: [
@@ -1686,7 +1896,7 @@
       const item = row.__item;
       const subItem = row.__subItem;
       const division = classifyDivision(item);
-      if (!division || !passesFilters(platform, date, productType, item)) continue;
+      if (!division || !passesFilters(platform, date, productType, item, row.__subItem)) continue;
       const campaignRaw = weeklyRawText(row, fp, platform, "campaign");
       const month = String(Number(monthOf(date)));
       const key = [yearOf(date), month, productType, item, campaignRaw, subItem].join("\u0001");
@@ -1731,7 +1941,7 @@
       const item = row.__item;
       const subItem = row.__subItem;
       const division = classifyDivision(item);
-      if (!division || !passesFilters(platform, date, productType, item)) continue;
+      if (!division || !passesFilters(platform, date, productType, item, row.__subItem)) continue;
       const campaignIdRaw = weeklyRawText(row, fp, platform, "campaignId");
       const campaignRaw = weeklyRawText(row, fp, platform, "campaign");
       const viidRaw = weeklyRawText(row, fp, platform, "viid");
@@ -1784,7 +1994,7 @@
       const item = row.__item;
       const subItem = row.__subItem;
       const division = classifyDivision(item);
-      if (!division || !passesFilters(platform, date, productType, item)) continue;
+      if (!division || !passesFilters(platform, date, productType, item, row.__subItem)) continue;
       const campaignIdRaw = weeklyRawText(row, fp, platform, "campaignId");
       const campaignRaw = weeklyRawText(row, fp, platform, "campaign");
       const viidRaw = weeklyRawText(row, fp, platform, "viid");
