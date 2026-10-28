@@ -1,9 +1,10 @@
 name: Update data manifest
 
-# data/coupang, data/naver 에 csv/xlsx 파일이, INDEX/ 에 품목 분류 파일이,
-# 또는 리포트양식/ 에 양식 파일이 새로 올라오면 scripts/build_manifest.py 를
-# 실행해서 data/manifest.json 을 자동으로 갱신하고, 바뀐 내용이 있으면
-# 자동으로 커밋/푸시한다.
+# data/coupang, data/naver 에 csv/xlsx/xlsb 파일이, INDEX/ 에 품목 분류 파일이,
+# 또는 리포트양식/ 에 양식 파일이 새로 올라오면 scripts/build_dashboard_cache.py
+# (쿠팡 키워드 리포트를 대시보드용으로 미리 합친 data/_cache/)와
+# scripts/build_manifest.py 를 실행해서 data/manifest.json 을 자동으로 갱신하고,
+# 바뀐 내용이 있으면 자동으로 커밋/푸시한다.
 # 리포트 웹페이지(index.html)는 이 manifest.json 을 읽어서 어떤 파일이 있는지 안다.
 
 on:
@@ -13,9 +14,13 @@ on:
       - "data/coupang/**.csv"
       - "data/coupang/**.xlsx"
       - "data/coupang/**.xls"
+      - "data/coupang/**.xlsb"
       - "data/naver/**.csv"
       - "data/naver/**.xlsx"
       - "data/naver/**.xls"
+      - "data/naver/**.xlsb"
+      - "scripts/build_dashboard_cache.py"
+      - "scripts/build_manifest.py"
       - "INDEX/**.xlsb"
       - "INDEX/**.xlsx"
       - "INDEX/**.xls"
@@ -41,17 +46,23 @@ jobs:
         with:
           python-version: "3.x"
 
+      # 쿠팡 키워드 리포트(수십만 행)를 키워드만 합친 가벼운 JSON으로 미리
+      # 만들어둔다. 대시보드는 브라우저에서 원본을 해석하는 대신 이걸 읽는다
+      # (원본 해석은 메모리가 많이 들어서 모바일에서 무한로딩이 됐음).
+      - name: Build dashboard cache
+        run: python3 scripts/build_dashboard_cache.py
+
       - name: Build manifest
         run: python3 scripts/build_manifest.py
 
-      - name: Commit manifest if changed
+      - name: Commit manifest/cache if changed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- data/manifest.json; then
-            echo "manifest.json 변경 없음"
+          git add -A data/manifest.json data/_cache
+          if git diff --cached --quiet; then
+            echo "manifest.json / 캐시 변경 없음"
           else
-            git add data/manifest.json
             git commit -m "chore: update data manifest"
             git push
           fi
