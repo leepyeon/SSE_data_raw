@@ -700,14 +700,21 @@
     }
     if (!Array.isArray(state.manifest.files)) state.manifest.files = [];
     state.selectedPaths = new Set(state.manifest.files.map((f) => f.path));
-    await loadIndexMaps();
-    await loadGfaIndexMaps();
-    await reloadData();
+    // INDEX/GFA 조회표와 raw 데이터 파일은 서로 의존 관계가 없어서(조회표는
+    // 행별 품목 분류를 "미리 계산"할 때만 필요하고, 그 계산은 모든 파일을
+    // 다 받은 다음에 한다) 순서대로 기다리지 않고 한꺼번에 병렬로 불러온다.
+    const [, , allRows] = await Promise.all([loadIndexMaps(), loadGfaIndexMaps(), fetchAllDataRows()]);
+    state.rows = allRows;
+    computeColsByFile();
+    precomputeRowMeta();
+    renderAll();
+    const banner = el("loadingBanner");
+    if (banner) banner.hidden = true;
   }
 
-  async function reloadData() {
-    // 파일을 하나씩 순서대로 fetch+parse하면 느려서(raw가 많으면 파일도
-    // 여러 개, 각각 수만~수십만 행), 서로 독립적인 파일들을 병렬로 불러온다.
+  // raw 파일을 하나씩 순서대로 fetch+parse하면 느려서(raw가 많으면 파일도
+  // 여러 개, 각각 수만~수십만 행), 서로 독립적인 파일들을 병렬로 불러온다.
+  async function fetchAllDataRows() {
     const perFileRows = await Promise.all(
       state.manifest.files.map(async (f) => {
         try {
@@ -726,11 +733,7 @@
         }
       })
     );
-    const allRows = perFileRows.flat();
-    state.rows = allRows;
-    computeColsByFile();
-    precomputeRowMeta();
-    renderAll();
+    return perFileRows.flat();
   }
 
   // 파일 하나의 raw 컬럼 구성은 보통 모든 행이 같아서(xlsx는 defval로,

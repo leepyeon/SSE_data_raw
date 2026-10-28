@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>쿠팡 · 네이버 광고 리포트</title>
-<link rel="stylesheet" href="assets/style.css?v=6" />
+<link rel="stylesheet" href="assets/style.css?v=7" />
 </head>
 <body>
 <div class="page">
@@ -20,6 +20,11 @@
   <div class="platform-tabs" id="platformTabs">
     <button class="tab-btn active" data-platform="coupang" type="button">쿠팡</button>
     <button class="tab-btn" data-platform="naver" type="button">네이버</button>
+  </div>
+
+  <div class="loading-banner" id="loadingBanner">
+    <span class="spinner" aria-hidden="true"></span>
+    <span>raw 데이터를 불러오는 중입니다... 처음 로딩은 데이터 양에 따라 몇 초~십수 초 걸릴 수 있어요.</span>
   </div>
 
   <div class="card" id="slicerCard">
@@ -113,6 +118,6 @@
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <!-- app.js를 바꿀 때마다 아래 v= 숫자를 올려서, 예전 파일이 브라우저에 캐시되어 남아있는 문제를 방지합니다. -->
-<script src="assets/app.js?v=23"></script>
+<script src="assets/app.js?v=24"></script>
 </body>
 </html>
