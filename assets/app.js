@@ -444,10 +444,10 @@
     return true;
   }
 
-  // 필터 버튼 목록. 각 기준의 버튼은 "나머지 기준들"을 모두 통과하는 데이터가
-  // 있는 값만 보여준다(예: PA를 고르면 PA 데이터가 있는 품목만 남음). 이미
-  // 선택한 값은 데이터가 없어져도 다시 끌 수 있게 항상 남겨둔다.
-  // 상세 품목은 품목을 하나 이상 골랐을 때만, 고른 품목의 상세 품목만 보여준다.
+  // 필터 버튼 목록. 버튼 위치가 클릭할 때마다 움직이지 않도록 버튼은 항상
+  // 전부 보여주고(all), "나머지 기준들"을 모두 통과하는 데이터가 있는 값만
+  // 누를 수 있게 한다(available - 나머지는 흐리게, 예: PA를 고르면 PA 데이터가
+  // 없는 품목은 흐려짐). 상세 품목은 고른 품목의 상세 품목만 보여준다.
   const FILTER_DIMENSIONS = ["years", "months", "weeks", "divisions", "productTypes", "itemCategories", "subItems"];
 
   function computeFilterOptions(platform) {
@@ -456,7 +456,11 @@
     // 필터가 계속 걸려 있지 않도록).
     if (!f.itemCategories.size) f.subItems.clear();
     const opts = {};
-    for (const dim of FILTER_DIMENSIONS) opts[dim] = new Set(f[dim]);
+    const all = {};
+    for (const dim of FILTER_DIMENSIONS) {
+      opts[dim] = new Set(f[dim]);
+      all[dim] = new Set(f[dim]);
+    }
     const subItemsOfSelected = new Set();
     for (const row of state.rows) {
       if (row.__platform !== platform) continue;
@@ -477,8 +481,10 @@
       if (platform === "coupang" && f.itemCategories.has(item) && subItem) subItemsOfSelected.add(subItem);
       for (const dim of FILTER_DIMENSIONS) {
         const v = values[dim];
-        if (v == null || opts[dim].has(v)) continue;
+        if (v == null) continue;
         if (dim === "subItems" && !f.itemCategories.has(item)) continue;
+        all[dim].add(v);
+        if (opts[dim].has(v)) continue;
         if (passesFilters(platform, date, row.__productType, item, subItem, dim)) opts[dim].add(v);
       }
     }
@@ -486,18 +492,14 @@
       if (!subItemsOfSelected.has(v)) {
         f.subItems.delete(v);
         opts.subItems.delete(v);
+        all.subItems.delete(v);
       }
     }
     const ko = (a, b) => a.localeCompare(b, "ko");
-    return {
-      years: [...opts.years].sort(),
-      months: [...opts.months].sort(),
-      weeks: [...opts.weeks].sort(),
-      divisions: [...opts.divisions].sort(),
-      productTypes: [...opts.productTypes].sort(),
-      itemCategories: [...opts.itemCategories].sort(ko),
-      subItems: [...opts.subItems].sort(ko),
-    };
+    const sorted = (dim) => [...all[dim]].sort(dim === "itemCategories" || dim === "subItems" ? ko : undefined);
+    const result = { available: opts };
+    for (const dim of FILTER_DIMENSIONS) result[dim] = sorted(dim);
+    return result;
   }
 
   function formatMetric(value, format) {
@@ -1255,17 +1257,24 @@
     }
   }
 
-  function renderSlicerGroup(containerId, values, selectedSet, formatLabel) {
+  // available(Set)에 없는 값은 지금 다른 필터 조건에서 데이터가 없다는 뜻이라
+  // 흐리게 하고 못 누르게 한다(이미 선택한 값은 끌 수 있게 그대로 둠).
+  function renderSlicerGroup(containerId, values, selectedSet, formatLabel, available, emptyText = "-") {
     const area = el(containerId);
     area.innerHTML = "";
     if (values.length === 0) {
-      area.innerHTML = `<span class="empty-state">-</span>`;
+      area.innerHTML = `<span class="empty-state">${escapeHtml(emptyText)}</span>`;
       return;
     }
     for (const v of values) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "slicer-btn" + (selectedSet.has(v) ? " active" : "");
+      if (available && !available.has(v) && !selectedSet.has(v)) {
+        btn.disabled = true;
+        btn.classList.add("unavailable");
+        btn.title = "지금 고른 다른 필터 조건에는 데이터가 없습니다";
+      }
       btn.textContent = formatLabel ? formatLabel(v) : v;
       btn.addEventListener("click", () => {
         if (selectedSet.has(v)) selectedSet.delete(v);
@@ -1280,21 +1289,28 @@
   function renderSlicers() {
     const platform = state.activePlatform;
     const options = computeFilterOptions(platform);
+    const av = options.available;
     const f = state.filters[platform];
-    renderSlicerGroup("yearSlicer", options.years, f.years, (y) => `${y}년`);
-    renderSlicerGroup("monthSlicer", options.months, f.months, (m) => `${Number(m)}월`);
-    renderSlicerGroup("weekSlicer", options.weeks, f.weeks, weekNameFormatter(options.weeks));
+    renderSlicerGroup("yearSlicer", options.years, f.years, (y) => `${y}년`, av.years);
+    renderSlicerGroup("monthSlicer", options.months, f.months, (m) => `${Number(m)}월`, av.months);
+    renderSlicerGroup("weekSlicer", options.weeks, f.weeks, weekNameFormatter(options.weeks), av.weeks);
     // 버튼에 마우스를 올리면 실제 기간(월~일)이 보이게
     for (const btn of el("weekSlicer").querySelectorAll(".slicer-btn")) {
       const i = [...btn.parentNode.children].indexOf(btn);
-      btn.title = weekOf(options.weeks[i]).label;
+      if (!btn.disabled) btn.title = weekOf(options.weeks[i]).label;
     }
-    renderSlicerGroup("divisionSlicer", options.divisions, f.divisions);
-    renderSlicerGroup("productTypeSlicer", options.productTypes, f.productTypes);
-    renderSlicerGroup("itemCategorySlicer", options.itemCategories, f.itemCategories);
-    // 상세 품목은 품목을 골랐을 때만 나타난다.
-    el("subItemFilterGroup").hidden = !f.itemCategories.size;
-    renderSlicerGroup("subItemSlicer", options.subItems, f.subItems);
+    renderSlicerGroup("divisionSlicer", options.divisions, f.divisions, null, av.divisions);
+    renderSlicerGroup("productTypeSlicer", options.productTypes, f.productTypes, null, av.productTypes);
+    renderSlicerGroup("itemCategorySlicer", options.itemCategories, f.itemCategories, null, av.itemCategories);
+    renderSlicerGroup("subItemSlicer", options.subItems, f.subItems, null, av.subItems, "품목을 고르면 상세 품목이 나옵니다");
+    // 구분/품목/상세 품목은 쿠팡 전용이라 네이버 탭에서는 줄 자체를 숨긴다.
+    for (const id of ["divisionFilterGroup", "itemFilterGroup", "subItemFilterGroup"]) {
+      el(id).hidden = platform !== "coupang";
+    }
+    const selectedCount = FILTER_DIMENSIONS.reduce((n, dim) => n + f[dim].size, 0);
+    const reset = el("filterResetBtn");
+    reset.disabled = selectedCount === 0;
+    reset.textContent = selectedCount ? `필터 초기화 (${selectedCount})` : "필터 초기화";
   }
 
   function formatSize(bytes) {
@@ -1759,6 +1775,13 @@
       renderAll();
     });
   }
+
+  el("filterResetBtn").addEventListener("click", () => {
+    const f = state.filters[state.activePlatform];
+    for (const dim of FILTER_DIMENSIONS) f[dim].clear();
+    state.table1Page = 1;
+    renderAll();
+  });
 
   el("table1PrevBtn").addEventListener("click", () => {
     state.table1Page = Math.max(1, state.table1Page - 1);
