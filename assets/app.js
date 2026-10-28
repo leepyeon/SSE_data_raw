@@ -86,7 +86,11 @@
   // "__campaign"/"__group"은 이미 계산해둔 캠페인명/그룹명을 그대로 재사용하라는 뜻.
   const PRODUCT_LABEL_FIELD = {
     coupang: {
-      PA: "광고전환매출발생 상품명",
+      // 품목/상세품목이 광고 기준(캠페인/VIID/광고집행 상품명)으로 정해지므로
+      // 상품도 광고한 상품 기준으로 맞춘다. "광고전환매출발생 상품명"(광고를
+      // 보고 실제로 산 상품)을 쓰면 에어드레서 광고로 세탁기가 팔린 경우처럼
+      // 필터와 다른 상품이 섞여 나온다.
+      PA: "광고집행 상품명",
       BPA: "__campaign",
       // NCA는 캠페인명이 "[NCA] 10월 브랜드위크_모바일(상품소재)"처럼 여러
       // 상품을 묶는 기획전 이름이라 상품을 구분 못 한다. "광고명"은 실제
@@ -605,11 +609,17 @@
 
   // 캠페인ID/캠페인명/그룹명/VIID 각각을 단독 키로 조회하는 맵 4개를 만든다
   // (여러 조건을 동시에 만족해야 하는 조합 키는 쓰지 않는다). 값은 {item,subItem}.
+  // 단, 그룹명이 인덱스에서 서로 다른 품목에 걸쳐 있으면(예: 쿠팡 기본값
+  // "새 광고 그룹"은 TV/청소기/냉장고 등 여러 캠페인에 공통) 그 그룹명만으로는
+  // 품목을 알 수 없으므로 조회 키에서 뺀다. 그래야 인덱스에 없는 새 캠페인이
+  // 마지막 행의 엉뚱한 품목으로 가지 않고, 다음 기준(VIID)으로 찾거나 그래도
+  // 없으면 "미분류"로 보인다. 품목은 같고 세부품목만 다른 그룹명은 그대로 쓴다.
   function buildIndexMaps(sheet) {
     const byCampaignId = new Map();
     const byCampaignName = new Map();
     const byGroupName = new Map();
     const byViid = new Map();
+    const groupNameItems = new Map(); // 그룹명 -> 그 그룹명이 쓰인 품목들
     const range = XLSX.utils.decode_range(sheet["!ref"] || "A1:A1");
     const lastRow = range.e.r + 1; // 1행이 헤더이므로 2행부터 lastRow까지 순회
     for (let r = 2; r <= lastRow; r++) {
@@ -622,7 +632,11 @@
         const entry = { item, subItem };
         if (cid) byCampaignId.set(cid, entry);
         if (campaignName) byCampaignName.set(campaignName, entry);
-        if (groupName) byGroupName.set(groupName, entry);
+        if (groupName) {
+          byGroupName.set(groupName, entry);
+          if (!groupNameItems.has(groupName)) groupNameItems.set(groupName, new Set());
+          groupNameItems.get(groupName).add(item);
+        }
       }
       const vid = normalizeId(sheetCellText(sheet, "I", r)); // I열 VIID
       const rightItem = sheetCellText(sheet, "K", r); // K열 품목
@@ -630,6 +644,9 @@
         const rightSubItem = sheetCellText(sheet, "L", r) || rightItem; // L열 세부품목
         byViid.set(vid, { item: rightItem, subItem: rightSubItem });
       }
+    }
+    for (const [groupName, items] of groupNameItems) {
+      if (items.size > 1) byGroupName.delete(groupName);
     }
     return { byCampaignId, byCampaignName, byGroupName, byViid };
   }
@@ -894,7 +911,7 @@
   }
 
   // 쿠팡 PA 키워드 리포트처럼 "키워드" 컬럼이 있는 파일만, 날짜+캠페인ID+
-  // 캠페인명+그룹명+VIID+광고집행상품명+광고전환매출발생상품명 단위로(즉
+  // 캠페인명+그룹명+VIID+광고집행상품명 단위로(즉
   // 표1~4가 보는 모든 차원은 그대로 두고 키워드만) 묶어서 노출수/클릭수/
   // 광고비/전환수/전환매출만 합산한 가벼운 행을 만든다. 품목/구분은 이
   // 그룹 안에서 전부 같은 값이라(캠페인ID/캠페인명/그룹명/VIID가 품목
@@ -910,8 +927,6 @@
       viid: resolveFieldForCols(cols, platform, "viid"),
       execProductName: resolveFieldForCols(cols, platform, "execProductName"),
     };
-    const soldProductCol = cols.has("광고전환매출발생 상품명") ? "광고전환매출발생 상품명" : null;
-    const soldOptionCol = cols.has("광고전환매출발생 옵션ID") ? "광고전환매출발생 옵션ID" : null;
     const metricCols = {};
     for (const f of DASHBOARD_METRIC_FIELDS) metricCols[f] = resolveFieldForCols(cols, platform, f);
     const groups = new Map();
@@ -919,8 +934,6 @@
       const key = [
         row.__date,
         ...Object.values(keyCols).map((c) => (c ? row[c] : "")),
-        soldProductCol ? row[soldProductCol] : "",
-        soldOptionCol ? row[soldOptionCol] : "",
       ].join("\u0001");
       let g = groups.get(key);
       if (!g) {
@@ -937,8 +950,6 @@
           const col = keyCols[name];
           if (col) g[col] = row[col];
         }
-        if (soldProductCol) g[soldProductCol] = row[soldProductCol];
-        if (soldOptionCol) g[soldOptionCol] = row[soldOptionCol];
         groups.set(key, g);
       }
       for (const f of DASHBOARD_METRIC_FIELDS) {
@@ -1048,7 +1059,7 @@
   // 클릭했을 때만 쿠팡 파일들의 다운로드용 캐시(키워드를 합치지 않은 것)를
   // 받아서 build(rows)에 넘긴다. 그동안 state.colsByFile은 다운로드용 행의
   // 컬럼으로 바뀌고(그래야 "키워드" 등이 잡힘), 끝나면 대시보드용으로
-  // 되돌린다(다운로드용 캐시엔 표4의 "광고전환매출발생 상품명"이 없다).
+  // 되돌린다.
   async function withFullCoupangRows(build) {
     const savedCols = new Map(state.colsByFile);
     fieldResolutionCache = new Map();
@@ -1200,7 +1211,7 @@
       const key = `${productType}\u0001${productName}`;
       accumulateRow(groups, key, { productType, productName, viids: new Set() }, row, fp, platform);
       if (platform === "coupang") {
-        const viid = productViid(row, fp, productType);
+        const viid = productViid(row, fp);
         if (viid) groups.get(key).viids.add(viid);
       }
     }
@@ -1214,13 +1225,8 @@
     return { rows, totalRevenue };
   }
 
-  // TOP10 상품의 VIID: PA는 판매된 상품(광고전환매출발생 상품명)의 옵션ID,
-  // 그 외(BPA 등)는 광고집행 옵션ID. NCA처럼 둘 다 없으면 null.
-  function productViid(row, fp, productType) {
-    const cols = state.colsByFile.get(fp);
-    if (productType === "PA" && cols && cols.has("광고전환매출발생 옵션ID")) {
-      return normalizeId(row["광고전환매출발생 옵션ID"]) || null;
-    }
+  // TOP10 상품의 VIID: 광고집행 옵션ID(PA/BPA). NCA처럼 없으면 null.
+  function productViid(row, fp) {
     const viidCol = resolveField(fp, "coupang", "viid");
     return viidCol ? normalizeId(row[viidCol]) || null : null;
   }
