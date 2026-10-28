@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>쿠팡 · 네이버 광고 리포트</title>
-<link rel="stylesheet" href="assets/style.css?v=8" />
+<link rel="stylesheet" href="assets/style.css?v=9" />
 </head>
 <body class="locked">
 <div class="lock-screen" id="lockScreen">
@@ -48,8 +48,12 @@
         <div class="chip-list" id="monthSlicer"></div>
       </div>
       <div class="filter-group">
-        <span class="label">주차 (월~일)</span>
+        <span class="label">주차</span>
         <div class="chip-list" id="weekSlicer"></div>
+      </div>
+      <div class="filter-group">
+        <span class="label">구분</span>
+        <div class="chip-list" id="divisionSlicer"></div>
       </div>
       <div class="filter-group">
         <span class="label">광고상품유형</span>
@@ -59,14 +63,19 @@
         <span class="label">품목</span>
         <div class="chip-list" id="itemCategorySlicer"></div>
       </div>
+      <div class="filter-group" id="subItemFilterGroup" hidden>
+        <span class="label">상세 품목</span>
+        <div class="chip-list" id="subItemSlicer"></div>
+      </div>
     </div>
   </div>
 
   <div class="card" id="chartCard">
-    <h2>일자별 광고비 · ROAS</h2>
+    <h2>일자별 광고비 · ROAS 추이</h2>
     <div class="chart-legend">
       <span><span class="legend-swatch legend-bar"></span>광고비 (왼쪽 축)</span>
       <span><span class="legend-swatch legend-line"></span>ROAS (오른쪽 축)</span>
+      <span><span class="legend-swatch legend-week"></span>주차 구분</span>
     </div>
     <div class="chart-wrap">
       <div id="dailyChart" class="chart-area"></div>
@@ -96,11 +105,21 @@
 
   <div class="card" id="table4Card">
     <h2>판매 우수 상품 TOP 10</h2>
-    <div class="table-scroll">
-      <table>
-        <thead id="table4Head"></thead>
-        <tbody id="table4Body"></tbody>
-      </table>
+    <div class="top10-layout">
+      <div class="table-scroll">
+        <table>
+          <thead id="table4Head"></thead>
+          <tbody id="table4Body"></tbody>
+        </table>
+      </div>
+      <div class="top10-pie">
+        <div class="top10-pie-title">매출 비중</div>
+        <div class="chart-wrap">
+          <div id="top10Pie" class="pie-area"></div>
+          <div id="top10PieTooltip" class="chart-tooltip" hidden></div>
+        </div>
+        <ul id="top10PieLegend" class="pie-legend"></ul>
+      </div>
     </div>
   </div>
 
@@ -143,6 +162,6 @@
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <!-- app.js를 바꿀 때마다 아래 v= 숫자를 올려서, 예전 파일이 브라우저에 캐시되어 남아있는 문제를 방지합니다. -->
-<script src="assets/app.js?v=31"></script>
+<script src="assets/app.js?v=32"></script>
 </body>
 </html>

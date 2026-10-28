@@ -14,6 +14,9 @@
   --critical: #d03b3b;
   --delta-up: #d03b3b; /* 증가 = 빨강 */
   --delta-down: #2a78d6; /* 하락 = 파랑 */
+  --chart-bar: #6250d6; /* 광고비 막대 = 보라 */
+  --chart-line: #1baf7a; /* ROAS 선 = 민트 */
+  --pie-other: #c3c2b7; /* 원그래프 기타 = 회색 */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -33,6 +36,9 @@
     --critical: #e66767;
     --delta-up: #e66767;
     --delta-down: #3987e5;
+    --chart-bar: #9085e9;
+    --chart-line: #199e70;
+    --pie-other: #52514e;
   }
 }
 
@@ -52,6 +58,9 @@
   --critical: #e66767;
   --delta-up: #e66767;
   --delta-down: #3987e5;
+  --chart-bar: #9085e9;
+  --chart-line: #199e70;
+  --pie-other: #52514e;
 }
 
 * {
@@ -312,11 +321,6 @@ select, input[type="text"] {
   background: var(--series-2);
 }
 
-.chart-wrap {
-  position: relative;
-  height: 280px;
-}
-
 .empty-state {
   color: var(--text-secondary);
   font-size: 13px;
@@ -570,13 +574,19 @@ body.locked .page {
   width: 10px;
   height: 10px;
   border-radius: 2px;
-  background: var(--series-1);
+  background: var(--chart-bar);
 }
 
 .legend-line {
   width: 16px;
   height: 2px;
-  background: var(--series-2);
+  background: var(--chart-line);
+}
+
+.legend-week {
+  width: 0;
+  height: 12px;
+  border-left: 1px dashed var(--text-muted);
 }
 
 .chart-wrap {
@@ -614,19 +624,15 @@ body.locked .page {
   font-weight: 600;
 }
 
-.chart-bar {
-  fill: var(--series-1);
-}
-
 .chart-line {
   fill: none;
-  stroke: var(--series-2);
+  stroke: var(--chart-line);
   stroke-width: 2;
   stroke-linejoin: round;
 }
 
 .chart-dot {
-  fill: var(--series-2);
+  fill: var(--chart-line);
   stroke: var(--surface-1);
   stroke-width: 2;
 }
@@ -673,11 +679,24 @@ body.locked .page {
 }
 
 .tt-bar {
-  background: var(--series-1);
+  background: var(--chart-bar);
 }
 
 .tt-line {
-  background: var(--series-2);
+  background: var(--chart-line);
+}
+
+.chart-week-sep {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  stroke-dasharray: 3 4;
+  opacity: 0.7;
+}
+
+.chart-week-label {
+  fill: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
 }
 
 /* ---------- 표3 증감율 ---------- */
@@ -691,4 +710,103 @@ td.delta-up {
 
 td.delta-down {
   color: var(--delta-down);
+}
+
+/* ---------- 상세 품목 필터 ---------- */
+.filter-group[hidden] {
+  display: none;
+}
+
+/* ---------- 표 합계 행 ---------- */
+tbody tr.total-row td {
+  font-weight: 700;
+  background: color-mix(in srgb, var(--chart-bar) 7%, var(--surface-1));
+  border-bottom: 1px solid var(--baseline);
+}
+
+/* ---------- 판매 우수 상품 TOP 10 + 매출 비중 원그래프 ---------- */
+.top10-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 250px;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .top10-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.rank-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+
+.top10-pie {
+  border: 1px solid var(--gridline);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.top10-pie-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.pie-area svg {
+  display: block;
+  margin: 0 auto;
+}
+
+.pie-slice {
+  stroke: var(--surface-1);
+  stroke-width: 2;
+  cursor: pointer;
+}
+
+.pie-slice:hover {
+  filter: brightness(1.08);
+}
+
+.pie-center-label {
+  fill: var(--text-secondary);
+  font-size: 12px;
+}
+
+.pie-center-value {
+  fill: var(--text-primary);
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.pie-legend {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+
+.pie-legend li {
+  display: flex;
+  align-items: center;
+  color: var(--text-secondary);
+}
+
+.pie-legend .legend-name {
+  flex: 1;
+}
+
+.pie-legend .legend-pct {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
 }
