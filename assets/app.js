@@ -34,6 +34,8 @@
       // NCA의 "총 전환 매출액 (14일)(원)" 같은 표기도 자동으로 잡힌다.
       execProductName: "광고집행 상품명",
       keyword: "키워드",
+      // NCA 세부품목 보정(의류케어 기획전 캠페인의 세탁기/건조기 구분)용.
+      adName: "광고명",
       totalConv1d: "총 판매수량(1일)",
       totalRevenue1d: "총 전환매출액(1일)",
       totalConv14d: "총 판매수량(14일)",
@@ -595,6 +597,18 @@
     __default__: ["campaignId", "campaignName", "groupName", "viid"],
   };
 
+  // NCA의 "[NCA] 10월 브랜드위크_의류케어(...)" 캠페인은 세탁기/건조기 광고를
+  // 하나의 캠페인으로 묶어서 캠페인명만으로는 세부품목을 못 가른다. 실제
+  // 광고 소재 단위인 "광고명"에 상품이 그대로 적혀 있어서(예: "...AI 콤보
+  // 세탁기...", "...건조기 9kg...") 그 텍스트로 세탁기/건조기를 가른다.
+  function refineNcaLaundrySubItem(adName) {
+    const s = String(adName ?? "");
+    if (!s) return null;
+    if (/건조기/.test(s)) return "건조기";
+    if (/콤보/.test(s)) return "세탁기";
+    return null;
+  }
+
   // 쿠팡 raw 한 행의 품목/세부품목을 찾는다. 상품구분(PA/BPA/NCA)에 따라 정해진
   // 순서로 캠페인ID/캠페인명/그룹명/VIID를 단독 키로 조회하고, 그래도 없으면
   // {item:"미분류", subItem:"미분류"}. 네이버는 품목 분류 데이터가 없으므로 null.
@@ -622,7 +636,15 @@
     const order = ITEM_CATEGORY_LOOKUP_ORDER[productType] || ITEM_CATEGORY_LOOKUP_ORDER.__default__;
     for (const field of order) {
       const v = values[field];
-      if (v && mapFor[field].has(v)) return mapFor[field].get(v);
+      if (v && mapFor[field].has(v)) {
+        const result = mapFor[field].get(v);
+        if (productType === "NCA" && result.item === "의류케어") {
+          const adNameCol = resolveField(fp, platform, "adName");
+          const refined = refineNcaLaundrySubItem(adNameCol ? row[adNameCol] : null);
+          if (refined) return { item: result.item, subItem: refined };
+        }
+        return result;
+      }
     }
     return unclassified;
   }
