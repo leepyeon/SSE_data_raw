@@ -30,7 +30,10 @@
    없이 그대로 끌어다 놓습니다.
 4. **Commit changes**로 저장합니다.
 
-몇 분 안에 GitHub Actions가 자동으로 `data/manifest.json`을 갱신하고,
+몇 분 안에 GitHub Actions가 자동으로 `data/manifest.json`을 갱신하고
+(쿠팡 PA 키워드 리포트처럼 수십만 행짜리 파일은 키워드 단위만 미리 합친
+가벼운 버전도 `data/_cache/`에 같이 만들어서, 대시보드는 브라우저에서 큰
+원본을 직접 해석하지 않고 그걸 읽습니다 - 모바일에서도 가볍게 열리도록),
 리포트 페이지를 새로고침하면 새 데이터가 바로 보입니다.
 (자세한 안내는 `data/coupang/README.md`, `data/naver/README.md` 참고)
 
@@ -164,10 +167,12 @@ assets/                    리포트 페이지의 스타일/스크립트
 data/coupang/*.csv|xlsx|xlsb   쿠팡 raw 데이터 (수동 업로드)
 data/naver/*.csv|xlsx|xlsb     네이버 raw 데이터 (수동 업로드)
 data/manifest.json         어떤 파일이 있는지 자동 생성되는 목록 (직접 수정 X)
+data/_cache/               쿠팡 키워드 리포트를 대시보드용으로 미리 합친 JSON (자동 생성, 직접 수정 X)
 INDEX/*.xlsb|xlsx          쿠팡 캠페인 품목 분류표 (수동 업로드)
 리포트양식/*.xlsb|xlsx     다운로드 버튼이 참고하는 양식 파일 (수동 업로드)
 scripts/build_manifest.py  manifest.json을 만드는 스크립트
-.github/workflows/update-manifest.yml   파일 업로드 시 manifest.json 자동 갱신
+scripts/build_dashboard_cache.py   data/_cache/를 만드는 스크립트
+.github/workflows/update-manifest.yml   파일 업로드 시 캐시+manifest.json 자동 갱신
 ```
 
 ## 참고

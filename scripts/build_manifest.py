@@ -32,14 +32,18 @@ def build():
     files = []
     for platform in PLATFORMS:
         for data_path in collect(DATA_DIR / platform, PATTERNS):
-            files.append(
-                {
-                    "platform": platform,
-                    "name": data_path.name,
-                    "path": data_path.relative_to(ROOT).as_posix(),
-                    "size": data_path.stat().st_size,
-                }
-            )
+            entry = {
+                "platform": platform,
+                "name": data_path.name,
+                "path": data_path.relative_to(ROOT).as_posix(),
+                "size": data_path.stat().st_size,
+            }
+            # scripts/build_dashboard_cache.py가 만든, 키워드를 미리 합친
+            # 가벼운 버전이 있으면 대시보드는 원본 대신 이걸 읽는다.
+            cache = DATA_DIR / "_cache" / platform / (data_path.name + ".json")
+            if cache.exists():
+                entry["cache"] = cache.relative_to(ROOT).as_posix()
+            files.append(entry)
 
     # INDEX/ 폴더: 쿠팡 캠페인의 '품목' 분류표(캠페인ID/VIID -> 품목). 리포트가
     # 파일명 기준으로 최신 것 하나를 골라서 쓴다.

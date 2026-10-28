@@ -205,7 +205,9 @@
       // 엑셀은 날짜 셀이 내부적으로 숫자(일련번호, 예: 46266)로 저장된다.
       // cellDates로 최대한 JS Date로 바꾸되, 셀 서식이 인식 안 되는 경우를 대비해
       // raw:true로 원본 값(숫자 or Date)을 그대로 받아 parseDateLoose에서 이중으로 처리한다.
-      const workbook = XLSX.read(new Uint8Array(buf), { type: "array", cellDates: true });
+      // cellText:false - 셀마다 화면표시용 문자열(.w)을 따로 만들지 않게 해서
+      // 큰 파일을 읽을 때 메모리를 아낀다(아래 sheet_to_json은 raw:true라 .v만 씀).
+      const workbook = XLSX.read(new Uint8Array(buf), { type: "array", cellDates: true, cellText: false });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(sheet, { raw: true, defval: "" });
       return rows.map((row) => trimKeys(normalizeXlsxRow(row)));
@@ -729,12 +731,19 @@
     // 품목 분류(loadAndTagFile 안에서 바로 계산)는 INDEX 조회표가 준비돼야
     // 하므로, indexMapsReadyPromise를 공유해서 "분류하는 순간"만 기다리게
     // 한다(파일 fetch 자체는 그대로 병렬로 진행됨).
-    indexMapsReadyPromise = loadIndexMaps();
-    const [, , allRows] = await Promise.all([indexMapsReadyPromise, loadGfaIndexMaps(), fetchAllDataRows()]);
-    state.rows = allRows;
-    renderAll();
     const banner = el("loadingBanner");
-    if (banner) banner.hidden = true;
+    try {
+      indexMapsReadyPromise = loadIndexMaps();
+      const [, , allRows] = await Promise.all([indexMapsReadyPromise, loadGfaIndexMaps(), fetchAllDataRows()]);
+      state.rows = allRows;
+      renderAll();
+      if (banner) banner.hidden = true;
+    } catch (e) {
+      // 여기서 예외가 나면 배너가 계속 "불러오는 중"으로 남아 무한로딩처럼
+      // 보이므로, 실패했다는 걸 화면에 분명히 보여준다.
+      console.error("대시보드를 불러오지 못했습니다:", e);
+      if (banner) banner.textContent = "데이터를 불러오는 중 문제가 생겼습니다. 새로고침해 주세요.";
+    }
   }
 
   // 쿠팡 PA 키워드 리포트처럼 "키워드" 컬럼이 있는 파일만, 날짜+캠페인ID+
@@ -797,8 +806,37 @@
   // 컬럼이 있는 파일(쿠팡 PA)이면, 원본 키워드별 행은 반환하지 않고 바로
   // 키워드 단위를 합친 가벼운 행만 돌려준다 - 수십만 행짜리 원본을 한
   // 순간이라도 더 오래 메모리에 들고 있지 않기 위해서다.
+  // scripts/build_dashboard_cache.py가 만든 캐시(키워드를 미리 합친 JSON)를
+  // 행 객체 배열로 푼다. 원본 파일이 바뀌었는데 캐시가 아직 안 갱신된
+  // 경우(크기가 다름)는 null을 돌려서 원본을 읽게 한다.
+  async function loadDashboardCache(f) {
+    const res = await fetch(f.cache);
+    if (!res.ok) return null;
+    const cache = await res.json();
+    if (cache.v !== 2 || cache.sourceSize !== f.size) return null;
+    const { groupColumns, metricColumns, dicts } = cache;
+    const g = groupColumns.length;
+    return cache.rows.map((r) => {
+      const row = {};
+      for (let j = 0; j < g; j++) row[groupColumns[j]] = dicts[j][r[j]];
+      for (let j = 0; j < metricColumns.length; j++) row[metricColumns[j]] = r[g + j];
+      return row;
+    });
+  }
+
   async function loadAndTagFile(f, aggregateKeywords = true) {
-    const rows = await parseDataFile(f.path);
+    let rows = null;
+    // 대시보드용(aggregateKeywords) 로드는 쿠팡 키워드 리포트를 브라우저에서
+    // 직접 해석하지 않고 미리 합쳐둔 캐시를 쓴다. 수십만 행짜리 xlsb를
+    // 해석하는 것 자체가 모바일에선 메모리 부족으로 실패했기 때문이다.
+    if (aggregateKeywords && f.cache) {
+      try {
+        rows = await loadDashboardCache(f);
+      } catch (e) {
+        console.error("대시보드 캐시를 불러오지 못해 원본을 읽습니다:", f.cache, e);
+      }
+    }
+    if (!rows) rows = await parseDataFile(f.path);
     if (rows.length === 0) return [];
     const productType = detectProductType(f.platform, f.name);
     const cols = new Set(Object.keys(rows[0]));

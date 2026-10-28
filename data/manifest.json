@@ -16,19 +16,22 @@
       "platform": "coupang",
       "name": "A00534677_pa_daily_keyword_CE_PA_20261001_20261027.xlsb",
       "path": "data/coupang/A00534677_pa_daily_keyword_CE_PA_20261001_20261027.xlsb",
-      "size": 8550238
+      "size": 8550238,
+      "cache": "data/_cache/coupang/A00534677_pa_daily_keyword_CE_PA_20261001_20261027.xlsb.json"
     },
     {
       "platform": "coupang",
       "name": "A00534677_pa_daily_keyword_MX_PA_20261001_20261027.xlsb",
       "path": "data/coupang/A00534677_pa_daily_keyword_MX_PA_20261001_20261027.xlsb",
-      "size": 1944342
+      "size": 1944342,
+      "cache": "data/_cache/coupang/A00534677_pa_daily_keyword_MX_PA_20261001_20261027.xlsb.json"
     },
     {
       "platform": "coupang",
       "name": "A01703872_pa_daily_keyword_하만_PA_20261001_20261027.xlsx",
       "path": "data/coupang/A01703872_pa_daily_keyword_하만_PA_20261001_20261027.xlsx",
-      "size": 769618
+      "size": 769618,
+      "cache": "data/_cache/coupang/A01703872_pa_daily_keyword_하만_PA_20261001_20261027.xlsx.json"
     },
     {
       "platform": "naver",
