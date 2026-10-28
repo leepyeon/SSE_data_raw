@@ -149,14 +149,17 @@
   const state = {
     manifest: { files: [] },
     selectedPaths: new Set(),
-    rows: [], // 원본 raw 행 (플랫폼/파일 태그 포함) - RAW 다운로드 버튼들이 이걸 쓴다
-    // 표1~4/슬라이서용 가벼운 버전. 쿠팡 키워드 리포트(PA)는 캠페인당
-    // 키워드별로 수십만 행까지 쪼개져 있는데, 표1~4는 품목/상품구분/캠페인
-    // 단위로만 묶어서 보여줘서 키워드 단위가 전혀 필요 없다. 그래서 키워드
-    // 차원을 미리 합쳐서(buildDashboardRows) 표1~4가 훑는 행 수를 크게
-    // 줄인다. RAW 다운로드(쿠팡 키워드_RAW 등)는 키워드가 필요해서 이 가벼운
-    // 버전이 아니라 원본 rows를 그대로 쓴다.
-    dashboardRows: [],
+    // 표1~4/슬라이서가 쓰는 행. 쿠팡 PA 키워드 리포트처럼 "키워드" 컬럼이
+    // 있는 파일은 캠페인당 키워드별로 수십만 행까지 쪼개져 있는데, 표1~4는
+    // 품목/상품구분/캠페인+상품 단위로만 묶어서 보여줘서 키워드 단위가
+    // 전혀 필요 없다. 그래서 그런 파일은 읽은 직후 바로 키워드 단위를
+    // 합쳐서(fetchAllDataRows/aggregateKeywordRows) 원본 키워드별 행 자체를
+    // 메모리에 남기지 않는다 - 모바일처럼 메모리가 적은 기기에서 수십만
+    // 행짜리 원본을 계속 들고 있으면 무한로딩/탭 다운으로 이어질 수
+    // 있어서다. "리포트RAW 다운받기"처럼 키워드 단위가 꼭 필요한 다운로드는
+    // 클릭했을 때 그 파일들만 따로 다시 받아서(fetchFullCoupangRows)
+    // 처리한다.
+    rows: [],
     colsByFile: new Map(), // filePath -> Set(원본 컬럼명)
     indexMaps: null, // INDEX/ 품목 분류 파일에서 만든 조회용 맵 (쿠팡 전용)
     gfaIndexMaps: null, // 리포트양식/ GFA 양식 파일의 품목 조회용 맵 (네이버 전용)
@@ -396,7 +399,7 @@
     const months = new Set();
     const productTypes = new Set();
     const itemCategories = new Set();
-    for (const row of state.dashboardRows) {
+    for (const row of state.rows) {
       if (row.__platform !== platform) continue;
       const date = row.__date;
       if (date) {
@@ -437,8 +440,16 @@
 
   // resolveField 결과는 filePath+field 조합에만 좌우되고(행 내용과 무관),
   // raw가 수십만 행이면 행마다 다시 계산하는 게 비싸서 캐시해둔다.
-  // computeColsByFile()에서 state.colsByFile을 다시 만들 때 함께 비운다.
+  // fetchAllDataRows()/fetchFullCoupangRows()가 state.colsByFile을 다시
+  // 만들 때 함께 비운다.
   let fieldResolutionCache = new Map();
+
+  // 쿠팡 raw 파일을 읽는 즉시(loadAndTagFile 안에서) 품목을 분류하는데,
+  // 그 분류는 INDEX 조회표(state.indexMaps)가 준비돼야 한다. raw 파일
+  // fetch는 INDEX 조회표 fetch와 병렬로 시작하므로, 분류하기 직전에 이
+  // promise를 기다려서 INDEX가 아직 안 끝났을 때 생기는 미분류 오류를
+  // 막는다. loadManifest()가 매번 새로 할당한다.
+  let indexMapsReadyPromise = null;
 
   // platform의 field(날짜/캠페인/그룹/광고비 등)가 filePath 안에서 어떤 실제 컬럼명인지 찾는다.
   function resolveField(filePath, platform, field) {
@@ -452,6 +463,12 @@
   function resolveFieldUncached(filePath, platform, field) {
     const cols = state.colsByFile.get(filePath);
     if (!cols) return null;
+    return resolveFieldForCols(cols, platform, field);
+  }
+
+  // cols(Set)만 있으면 되는 순수 버전. state.colsByFile이 아직 안 만들어진
+  // 시점(파일 하나를 막 읽어서 키워드 단위를 즉시 합칠 때 등)에도 쓴다.
+  function resolveFieldForCols(cols, platform, field) {
     const mapped = FIELD_MAP[platform]?.[field];
     if (mapped === NOT_MAPPED) return null;
     if (mapped) {
@@ -707,80 +724,17 @@
     }
     if (!Array.isArray(state.manifest.files)) state.manifest.files = [];
     state.selectedPaths = new Set(state.manifest.files.map((f) => f.path));
-    // INDEX/GFA 조회표와 raw 데이터 파일은 서로 의존 관계가 없어서(조회표는
-    // 행별 품목 분류를 "미리 계산"할 때만 필요하고, 그 계산은 모든 파일을
-    // 다 받은 다음에 한다) 순서대로 기다리지 않고 한꺼번에 병렬로 불러온다.
-    const [, , allRows] = await Promise.all([loadIndexMaps(), loadGfaIndexMaps(), fetchAllDataRows()]);
+    // INDEX 조회표 fetch와 raw 데이터 파일 fetch는 서로 의존 관계가 없어서
+    // 순서대로 기다리지 않고 한꺼번에 병렬로 시작한다. 다만 각 raw 파일의
+    // 품목 분류(loadAndTagFile 안에서 바로 계산)는 INDEX 조회표가 준비돼야
+    // 하므로, indexMapsReadyPromise를 공유해서 "분류하는 순간"만 기다리게
+    // 한다(파일 fetch 자체는 그대로 병렬로 진행됨).
+    indexMapsReadyPromise = loadIndexMaps();
+    const [, , allRows] = await Promise.all([indexMapsReadyPromise, loadGfaIndexMaps(), fetchAllDataRows()]);
     state.rows = allRows;
-    computeColsByFile();
-    precomputeRowMeta();
-    buildDashboardRows();
     renderAll();
     const banner = el("loadingBanner");
     if (banner) banner.hidden = true;
-  }
-
-  // raw 파일을 하나씩 순서대로 fetch+parse하면 느려서(raw가 많으면 파일도
-  // 여러 개, 각각 수만~수십만 행), 서로 독립적인 파일들을 병렬로 불러온다.
-  async function fetchAllDataRows() {
-    const perFileRows = await Promise.all(
-      state.manifest.files.map(async (f) => {
-        try {
-          const rows = await parseDataFile(f.path);
-          const productType = detectProductType(f.platform, f.name);
-          return rows.map((row) => ({
-            __platform: f.platform,
-            __file: f.name,
-            __filePath: f.path,
-            __productType: productType,
-            ...row,
-          }));
-        } catch (e) {
-          console.error("파일을 불러오지 못했습니다:", f.path, e);
-          return [];
-        }
-      })
-    );
-    return perFileRows.flat();
-  }
-
-  // 파일 하나의 raw 컬럼 구성은 보통 모든 행이 같아서(xlsx는 defval로,
-  // csv는 헤더 기준으로 항상 같은 키를 받음), 수십만 행을 전부 돌지 않고
-  // 파일당 첫 행만 보고 컬럼 집합을 만든다.
-  function computeColsByFile() {
-    const map = new Map();
-    for (const row of state.rows) {
-      if (map.has(row.__filePath)) continue;
-      const set = new Set();
-      for (const k of Object.keys(row)) {
-        if (k.startsWith("__")) continue;
-        set.add(k);
-      }
-      map.set(row.__filePath, set);
-    }
-    state.colsByFile = map;
-    fieldResolutionCache = new Map();
-  }
-
-  // 날짜/품목 분류는 행 내용(과 파일의 컬럼 매핑)에만 좌우되고 필터나 탭을
-  // 바꿔도 바뀌지 않는데, 표1~4가 각자 모든 행을 다시 훑으며 매번
-  // 다시 계산하면(행이 수십만 개면 렌더링마다 수십만×4번) 느려지므로,
-  // 로드 시점에 한 번만 계산해서 각 행에 캐싱해둔다.
-  function precomputeRowMeta() {
-    for (const row of state.rows) {
-      const fp = row.__filePath;
-      const platform = row.__platform;
-      const dateCol = resolveField(fp, platform, "date");
-      row.__date = dateCol ? parseDateLoose(row[dateCol]) : null;
-      if (platform === "coupang") {
-        const cls = resolveItemClassification(row, fp, platform, row.__productType);
-        row.__item = cls.item;
-        row.__subItem = cls.subItem;
-      } else {
-        row.__item = null;
-        row.__subItem = null;
-      }
-    }
   }
 
   // 쿠팡 PA 키워드 리포트처럼 "키워드" 컬럼이 있는 파일만, 날짜+캠페인ID+
@@ -791,66 +745,126 @@
   // 조회 키라서) 대표로 하나만 가져오면 된다.
   const DASHBOARD_METRIC_FIELDS = ["cost", "impressions", "clicks", "conversions", "revenue"];
 
-  function buildDashboardRows() {
-    const toAggregate = new Map(); // filePath -> rows
-    const passthrough = [];
-    for (const row of state.rows) {
-      const fp = row.__filePath;
-      if (row.__platform === "coupang" && resolveField(fp, "coupang", "keyword")) {
-        if (!toAggregate.has(fp)) toAggregate.set(fp, []);
-        toAggregate.get(fp).push(row);
+  function aggregateKeywordRows(rows, cols) {
+    const platform = "coupang";
+    const keyCols = {
+      campaignId: resolveFieldForCols(cols, platform, "campaignId"),
+      campaign: resolveFieldForCols(cols, platform, "campaign"),
+      group: resolveFieldForCols(cols, platform, "group"),
+      viid: resolveFieldForCols(cols, platform, "viid"),
+      execProductName: resolveFieldForCols(cols, platform, "execProductName"),
+    };
+    const soldProductCol = cols.has("광고전환매출발생 상품명") ? "광고전환매출발생 상품명" : null;
+    const metricCols = {};
+    for (const f of DASHBOARD_METRIC_FIELDS) metricCols[f] = resolveFieldForCols(cols, platform, f);
+    const groups = new Map();
+    for (const row of rows) {
+      const key = [
+        row.__date,
+        ...Object.values(keyCols).map((c) => (c ? row[c] : "")),
+        soldProductCol ? row[soldProductCol] : "",
+      ].join("\u0001");
+      let g = groups.get(key);
+      if (!g) {
+        g = {
+          __platform: row.__platform,
+          __file: row.__file,
+          __filePath: row.__filePath,
+          __productType: row.__productType,
+          __date: row.__date,
+          __item: row.__item,
+          __subItem: row.__subItem,
+        };
+        for (const name of Object.keys(keyCols)) {
+          const col = keyCols[name];
+          if (col) g[col] = row[col];
+        }
+        if (soldProductCol) g[soldProductCol] = row[soldProductCol];
+        groups.set(key, g);
+      }
+      for (const f of DASHBOARD_METRIC_FIELDS) {
+        const col = metricCols[f];
+        if (!col) continue;
+        const n = parseNumberLoose(row[col]);
+        if (Number.isFinite(n)) g[col] = (g[col] || 0) + n;
+      }
+    }
+    return [...groups.values()];
+  }
+
+  // raw 파일 하나를 읽어서 __platform/__productType/__date/__item/__subItem까지
+  // 채운 행 배열로 만든다. aggregateKeywords가 true(기본값)이고 "키워드"
+  // 컬럼이 있는 파일(쿠팡 PA)이면, 원본 키워드별 행은 반환하지 않고 바로
+  // 키워드 단위를 합친 가벼운 행만 돌려준다 - 수십만 행짜리 원본을 한
+  // 순간이라도 더 오래 메모리에 들고 있지 않기 위해서다.
+  async function loadAndTagFile(f, aggregateKeywords = true) {
+    const rows = await parseDataFile(f.path);
+    if (rows.length === 0) return [];
+    const productType = detectProductType(f.platform, f.name);
+    const cols = new Set(Object.keys(rows[0]));
+    state.colsByFile.set(f.path, cols);
+    const dateCol = resolveFieldForCols(cols, f.platform, "date");
+    // 품목 분류는 INDEX 조회표가 준비돼야 한다. raw 파일 fetch가 INDEX
+    // fetch보다 먼저 끝나는 경우(특히 fetchFullCoupangRows처럼 이미 로드된
+    // 뒤에 다시 부를 때는 즉시 반환됨)를 대비해 분류 직전에 기다린다.
+    if (f.platform === "coupang" && indexMapsReadyPromise) await indexMapsReadyPromise;
+    const tagged = rows.map((row) => {
+      const out = { __platform: f.platform, __file: f.name, __filePath: f.path, __productType: productType, ...row };
+      out.__date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      if (f.platform === "coupang") {
+        const cls = resolveItemClassification(out, f.path, f.platform, productType);
+        out.__item = cls.item;
+        out.__subItem = cls.subItem;
       } else {
-        passthrough.push(row);
+        out.__item = null;
+        out.__subItem = null;
       }
+      return out;
+    });
+    if (aggregateKeywords && f.platform === "coupang") {
+      const keywordCol = resolveFieldForCols(cols, "coupang", "keyword");
+      if (keywordCol) return aggregateKeywordRows(tagged, cols);
     }
-    const aggregated = [];
-    for (const [fp, rows] of toAggregate) {
-      const platform = "coupang";
-      const keyCols = {
-        campaignId: resolveField(fp, platform, "campaignId"),
-        campaign: resolveField(fp, platform, "campaign"),
-        group: resolveField(fp, platform, "group"),
-        viid: resolveField(fp, platform, "viid"),
-        execProductName: resolveField(fp, platform, "execProductName"),
-      };
-      const soldProductCol = state.colsByFile.get(fp)?.has("광고전환매출발생 상품명") ? "광고전환매출발생 상품명" : null;
-      const metricCols = {};
-      for (const f of DASHBOARD_METRIC_FIELDS) metricCols[f] = resolveField(fp, platform, f);
-      const groups = new Map();
-      for (const row of rows) {
-        const key = [
-          row.__date,
-          ...Object.values(keyCols).map((c) => (c ? row[c] : "")),
-          soldProductCol ? row[soldProductCol] : "",
-        ].join("\u0001");
-        let g = groups.get(key);
-        if (!g) {
-          g = {
-            __platform: row.__platform,
-            __file: row.__file,
-            __filePath: fp,
-            __productType: row.__productType,
-            __date: row.__date,
-            __item: row.__item,
-            __subItem: row.__subItem,
-          };
-          for (const name of Object.keys(keyCols)) {
-            const col = keyCols[name];
-            if (col) g[col] = row[col];
-          }
-          if (soldProductCol) g[soldProductCol] = row[soldProductCol];
-          groups.set(key, g);
+    return tagged;
+  }
+
+  // raw 파일을 하나씩 순서대로 fetch+parse하면 느려서(raw가 많으면 파일도
+  // 여러 개, 각각 수만~수십만 행), 서로 독립적인 파일들을 병렬로 불러온다.
+  async function fetchAllDataRows() {
+    state.colsByFile = new Map();
+    fieldResolutionCache = new Map();
+    const perFileRows = await Promise.all(
+      state.manifest.files.map(async (f) => {
+        try {
+          return await loadAndTagFile(f);
+        } catch (e) {
+          console.error("파일을 불러오지 못했습니다:", f.path, e);
+          return [];
         }
-        for (const f of DASHBOARD_METRIC_FIELDS) {
-          const col = metricCols[f];
-          if (!col) continue;
-          const n = parseNumberLoose(row[col]);
-          if (Number.isFinite(n)) g[col] = (g[col] || 0) + n;
+      })
+    );
+    return perFileRows.flat();
+  }
+
+  // "리포트RAW 다운받기"의 CE_RAW/MX_RAW(키워드별 1:1)와 쿠팡 키워드_RAW는
+  // 키워드 단위가 꼭 필요해서, 평소 표1~4가 쓰는 가벼운 state.rows가 아니라
+  // 클릭했을 때만 쿠팡 파일들을 다시 받아서 키워드를 합치지 않고 그대로 쓴다.
+  async function fetchFullCoupangRows() {
+    // colsByFile에 남아있는(키워드가 빠진) 가벼운 버전 캐시를 비워야, 이번에
+    // 다시 받는 전체 행에서 "키워드" 컬럼이 제대로 잡힌다.
+    fieldResolutionCache = new Map();
+    const files = state.manifest.files.filter((f) => f.platform === "coupang");
+    const perFileRows = await Promise.all(
+      files.map(async (f) => {
+        try {
+          return await loadAndTagFile(f, false);
+        } catch (e) {
+          console.error("파일을 불러오지 못했습니다:", f.path, e);
+          return [];
         }
-      }
-      aggregated.push(...groups.values());
-    }
-    state.dashboardRows = passthrough.concat(aggregated);
+      })
+    );
+    return perFileRows.flat();
   }
 
   // ---------- 집계 ----------
@@ -904,7 +918,7 @@
   // 한 가지 기준으로만 묶는다).
   function computeTable1(platform) {
     const groups = new Map();
-    for (const row of state.dashboardRows) {
+    for (const row of state.rows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
       const date = row.__date;
@@ -932,7 +946,7 @@
   // 표2. 상품구분 기준 전체기간 합산
   function computeTable2(platform) {
     const groups = new Map();
-    for (const row of state.dashboardRows) {
+    for (const row of state.rows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
       const date = row.__date;
@@ -947,7 +961,7 @@
   // 표3. 주차 기준 합산(상품구분 구분 없이 전체 합산)
   function computeTable3(platform) {
     const groups = new Map();
-    for (const row of state.dashboardRows) {
+    for (const row of state.rows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
       const date = row.__date;
@@ -963,7 +977,7 @@
   // 표4. 상품구분+상품명 기준 합산 후 전환매출 상위 10개
   function computeTable4(platform) {
     const groups = new Map();
-    for (const row of state.dashboardRows) {
+    for (const row of state.rows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
       const date = row.__date;
@@ -1246,10 +1260,10 @@
 
   // 쿠팡 탭에 지금 적용된 필터(년도/월/광고상품유형/품목) 기준으로 CE_RAW,
   // MX_RAW, 그리고 그 둘을 합친 ce,mx 전체_raw 행을 만든다.
-  function buildWeeklyRawSheets() {
+  function buildWeeklyRawSheets(rows) {
     const ceRows = [];
     const mxRows = [];
-    for (const row of state.rows) {
+    for (const row of rows) {
       if (row.__platform !== "coupang") continue;
       const built = buildWeeklyRawRow(row, row.__filePath, row.__productType);
       if (!built) continue;
@@ -1299,10 +1313,10 @@
     "세부 품목",
   ];
 
-  function buildMonthlyRawRows() {
+  function buildMonthlyRawRows(rows) {
     const platform = "coupang";
     const groups = new Map();
-    for (const row of state.rows) {
+    for (const row of rows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
       const productType = row.__productType;
@@ -1344,10 +1358,10 @@
     "세부 품목",
   ];
 
-  function buildConversionProductRows() {
+  function buildConversionProductRows(rows) {
     const platform = "coupang";
     const groups = new Map();
-    for (const row of state.rows) {
+    for (const row of rows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
       const productType = row.__productType;
@@ -1397,10 +1411,10 @@
     "세부 품목",
   ];
 
-  function buildKeywordRows() {
+  function buildKeywordRows(rows) {
     const platform = "coupang";
     const groups = new Map();
-    for (const row of state.rows) {
+    for (const row of rows) {
       if (row.__platform !== platform || row.__productType !== "PA") continue;
       const fp = row.__filePath;
       const productType = row.__productType;
@@ -1435,28 +1449,44 @@
     ]);
   }
 
-  el("downloadReportBtn").addEventListener("click", () => {
-    const workbook = XLSX.utils.book_new();
-    const rawSheets = buildWeeklyRawSheets();
-    for (const name of Object.keys(rawSheets)) {
-      XLSX.utils.book_append_sheet(workbook, rawSheets[name], name);
+  el("downloadReportBtn").addEventListener("click", async () => {
+    const btn = el("downloadReportBtn");
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "리포트 준비 중...";
+    try {
+      // CE_RAW/MX_RAW/쿠팡 키워드_RAW는 키워드 단위가 꼭 필요해서, 평소
+      // 표1~4가 쓰는 가벼운 state.rows 대신 지금 클릭한 시점에 쿠팡 파일을
+      // 다시 받아서(키워드를 합치지 않은 채로) 쓴다.
+      const fullRows = await fetchFullCoupangRows();
+      const workbook = XLSX.utils.book_new();
+      const rawSheets = buildWeeklyRawSheets(fullRows);
+      for (const name of Object.keys(rawSheets)) {
+        XLSX.utils.book_append_sheet(workbook, rawSheets[name], name);
+      }
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.aoa_to_sheet([MONTHLY_RAW_HEADER, ...buildMonthlyRawRows(fullRows)]),
+        "쿠팡_RAW"
+      );
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.aoa_to_sheet([CONVERSION_PRODUCT_HEADER, ...buildConversionProductRows(fullRows)]),
+        "쿠팡_전환상품_RAW"
+      );
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.aoa_to_sheet([KEYWORD_HEADER, ...buildKeywordRows(fullRows)]),
+        "쿠팡 키워드_RAW"
+      );
+      XLSX.writeFile(workbook, `쿠팡_상품광고_주간리포트_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch (e) {
+      console.error("리포트RAW를 만들지 못했습니다:", e);
+      alert("리포트RAW를 만드는 중 문제가 생겼습니다. 다시 시도해주세요.");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
     }
-    XLSX.utils.book_append_sheet(
-      workbook,
-      XLSX.utils.aoa_to_sheet([MONTHLY_RAW_HEADER, ...buildMonthlyRawRows()]),
-      "쿠팡_RAW"
-    );
-    XLSX.utils.book_append_sheet(
-      workbook,
-      XLSX.utils.aoa_to_sheet([CONVERSION_PRODUCT_HEADER, ...buildConversionProductRows()]),
-      "쿠팡_전환상품_RAW"
-    );
-    XLSX.utils.book_append_sheet(
-      workbook,
-      XLSX.utils.aoa_to_sheet([KEYWORD_HEADER, ...buildKeywordRows()]),
-      "쿠팡 키워드_RAW"
-    );
-    XLSX.writeFile(workbook, `쿠팡_상품광고_주간리포트_${new Date().toISOString().slice(0, 10)}.xlsx`);
   });
 
   // ---------- GFA리포트RAW 다운로드 (네이버 GFA_캠페인RAW/GFA_상품RAW 양식) ----------
