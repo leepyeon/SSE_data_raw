@@ -12,6 +12,8 @@
   --series-2: #eb6834; /* 네이버 */
   --good: #0ca30c;
   --critical: #d03b3b;
+  --delta-up: #d03b3b; /* 증가 = 빨강 */
+  --delta-down: #2a78d6; /* 하락 = 파랑 */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -29,6 +31,8 @@
     --series-2: #d95926;
     --good: #0ca30c;
     --critical: #e66767;
+    --delta-up: #e66767;
+    --delta-down: #3987e5;
   }
 }
 
@@ -46,6 +50,8 @@
   --series-2: #d95926;
   --good: #0ca30c;
   --critical: #e66767;
+  --delta-up: #e66767;
+  --delta-down: #3987e5;
 }
 
 * {
@@ -481,4 +487,208 @@ footer {
   font-size: 12px;
   margin-top: 24px;
   text-align: center;
+}
+
+/* ---------- 접속 비밀번호 ---------- */
+body.locked .page {
+  display: none;
+}
+
+.lock-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.lock-screen[hidden] {
+  display: none;
+}
+
+.lock-card {
+  width: 100%;
+  max-width: 340px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lock-card h1 {
+  font-size: 17px;
+  margin: 0 0 6px;
+}
+
+.lock-card label {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.lock-card input {
+  font-size: 16px; /* 16px 미만이면 iOS가 확대해버림 */
+  padding: 9px 12px;
+  border: 1px solid var(--baseline);
+  border-radius: 8px;
+  background: var(--page-plane);
+  color: var(--text-primary);
+}
+
+.lock-card button.primary {
+  padding: 10px 14px;
+  font-size: 14px;
+}
+
+.lock-error {
+  font-size: 13px;
+  color: var(--critical);
+}
+
+.lock-error[hidden] {
+  display: none;
+}
+
+/* ---------- 일자별 광고비·매출 그래프 ---------- */
+.chart-legend {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.legend-swatch {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+.legend-bar {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: var(--series-1);
+}
+
+.legend-line {
+  width: 16px;
+  height: 2px;
+  background: var(--series-2);
+}
+
+.chart-wrap {
+  position: relative;
+}
+
+.chart-area {
+  width: 100%;
+  min-height: 120px;
+}
+
+.chart-area svg {
+  display: block;
+  max-width: 100%;
+}
+
+.chart-grid {
+  stroke: var(--gridline);
+  stroke-width: 1;
+}
+
+.chart-baseline {
+  stroke: var(--baseline);
+  stroke-width: 1;
+}
+
+.chart-axis-label {
+  fill: var(--text-muted);
+  font-size: 11px;
+}
+
+.chart-axis-title {
+  fill: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.chart-bar {
+  fill: var(--series-1);
+}
+
+.chart-line {
+  fill: none;
+  stroke: var(--series-2);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.chart-dot {
+  fill: var(--series-2);
+  stroke: var(--surface-1);
+  stroke-width: 2;
+}
+
+.chart-hover-band {
+  fill: var(--text-primary);
+  opacity: 0.05;
+}
+
+.chart-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-primary);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  white-space: nowrap;
+  z-index: 2;
+}
+
+.chart-tooltip[hidden] {
+  display: none;
+}
+
+.chart-tooltip .tt-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.chart-tooltip .tt-muted {
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.tt-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 6px;
+}
+
+.tt-bar {
+  background: var(--series-1);
+}
+
+.tt-line {
+  background: var(--series-2);
+}
+
+/* ---------- 표3 증감율 ---------- */
+.week-compare-row td {
+  font-weight: 700;
+}
+
+td.delta-up {
+  color: var(--delta-up);
+}
+
+td.delta-down {
+  color: var(--delta-down);
 }
