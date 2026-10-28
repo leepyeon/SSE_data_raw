@@ -38,11 +38,17 @@ def build():
                 "path": data_path.relative_to(ROOT).as_posix(),
                 "size": data_path.stat().st_size,
             }
-            # scripts/build_dashboard_cache.py가 만든, 키워드를 미리 합친
-            # 가벼운 버전이 있으면 대시보드는 원본 대신 이걸 읽는다.
-            cache = DATA_DIR / "_cache" / platform / (data_path.name + ".json")
+            # scripts/build_dashboard_cache.py가 만든 캐시가 있으면 브라우저는
+            # 원본 대신 이걸 읽는다. cache = 키워드를 미리 합친 대시보드용,
+            # fullCache = 행은 원본 그대로에 다운로드용 컬럼만 남긴 것.
+            # (폴더명이 "_"로 시작하면 GitHub Pages가 배포하지 않으므로 "cache")
+            cache_dir = DATA_DIR / "cache" / platform
+            cache = cache_dir / (data_path.name + ".json")
             if cache.exists():
                 entry["cache"] = cache.relative_to(ROOT).as_posix()
+            full_cache = cache_dir / (data_path.name + ".full.json")
+            if full_cache.exists():
+                entry["fullCache"] = full_cache.relative_to(ROOT).as_posix()
             files.append(entry)
 
     # INDEX/ 폴더: 쿠팡 캠페인의 '품목' 분류표(캠페인ID/VIID -> 품목). 리포트가

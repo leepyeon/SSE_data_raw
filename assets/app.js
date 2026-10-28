@@ -157,7 +157,7 @@
     // 메모리에 남기지 않는다 - 모바일처럼 메모리가 적은 기기에서 수십만
     // 행짜리 원본을 계속 들고 있으면 무한로딩/탭 다운으로 이어질 수
     // 있어서다. "리포트RAW 다운받기"처럼 키워드 단위가 꼭 필요한 다운로드는
-    // 클릭했을 때 그 파일들만 따로 다시 받아서(fetchFullCoupangRows)
+    // 클릭했을 때 그 파일들만 따로 다시 받아서(withFullCoupangRows)
     // 처리한다.
     rows: [],
     colsByFile: new Map(), // filePath -> Set(원본 컬럼명)
@@ -442,7 +442,7 @@
 
   // resolveField 결과는 filePath+field 조합에만 좌우되고(행 내용과 무관),
   // raw가 수십만 행이면 행마다 다시 계산하는 게 비싸서 캐시해둔다.
-  // fetchAllDataRows()/fetchFullCoupangRows()가 state.colsByFile을 다시
+  // fetchAllDataRows()/withFullCoupangRows()가 state.colsByFile을 다시
   // 만들 때 함께 비운다.
   let fieldResolutionCache = new Map();
 
@@ -806,11 +806,12 @@
   // 컬럼이 있는 파일(쿠팡 PA)이면, 원본 키워드별 행은 반환하지 않고 바로
   // 키워드 단위를 합친 가벼운 행만 돌려준다 - 수십만 행짜리 원본을 한
   // 순간이라도 더 오래 메모리에 들고 있지 않기 위해서다.
-  // scripts/build_dashboard_cache.py가 만든 캐시(키워드를 미리 합친 JSON)를
-  // 행 객체 배열로 푼다. 원본 파일이 바뀌었는데 캐시가 아직 안 갱신된
-  // 경우(크기가 다름)는 null을 돌려서 원본을 읽게 한다.
-  async function loadDashboardCache(f) {
-    const res = await fetch(f.cache);
+  // scripts/build_dashboard_cache.py가 만든 캐시 JSON(f.cache = 키워드를
+  // 미리 합친 대시보드용, f.fullCache = 행은 원본 그대로에 다운로드용
+  // 컬럼만 남긴 것)을 행 객체 배열로 푼다. 원본 파일이 바뀌었는데 캐시가
+  // 아직 안 갱신된 경우(크기가 다름)는 null을 돌려서 원본을 읽게 한다.
+  async function loadCacheRows(url, f) {
+    const res = await fetch(url);
     if (!res.ok) return null;
     const cache = await res.json();
     if (cache.v !== 2 || cache.sourceSize !== f.size) return null;
@@ -826,14 +827,17 @@
 
   async function loadAndTagFile(f, aggregateKeywords = true) {
     let rows = null;
-    // 대시보드용(aggregateKeywords) 로드는 쿠팡 키워드 리포트를 브라우저에서
-    // 직접 해석하지 않고 미리 합쳐둔 캐시를 쓴다. 수십만 행짜리 xlsb를
-    // 해석하는 것 자체가 모바일에선 메모리 부족으로 실패했기 때문이다.
-    if (aggregateKeywords && f.cache) {
+    // 쿠팡 키워드 리포트는 브라우저에서 원본 xlsb를 직접 해석하지 않고
+    // Actions가 미리 만들어 둔 캐시를 쓴다. 수십만 행짜리 xlsb는 모바일에선
+    // 메모리 부족으로, PC에서도 SheetJS가 수 분씩 멈추거나 데이터를 놓쳐서
+    // 제대로 읽히지 않았다. 대시보드는 키워드를 합친 캐시, 다운로드는
+    // 행을 그대로 둔 캐시를 쓴다.
+    const cacheUrl = aggregateKeywords ? f.cache : f.fullCache;
+    if (cacheUrl) {
       try {
-        rows = await loadDashboardCache(f);
+        rows = await loadCacheRows(cacheUrl, f);
       } catch (e) {
-        console.error("대시보드 캐시를 불러오지 못해 원본을 읽습니다:", f.cache, e);
+        console.error("캐시를 불러오지 못해 원본을 읽습니다:", cacheUrl, e);
       }
     }
     if (!rows) rows = await parseDataFile(f.path);
@@ -843,12 +847,18 @@
     state.colsByFile.set(f.path, cols);
     const dateCol = resolveFieldForCols(cols, f.platform, "date");
     // 품목 분류는 INDEX 조회표가 준비돼야 한다. raw 파일 fetch가 INDEX
-    // fetch보다 먼저 끝나는 경우(특히 fetchFullCoupangRows처럼 이미 로드된
+    // fetch보다 먼저 끝나는 경우(특히 withFullCoupangRows처럼 이미 로드된
     // 뒤에 다시 부를 때는 즉시 반환됨)를 대비해 분류 직전에 기다린다.
     if (f.platform === "coupang" && indexMapsReadyPromise) await indexMapsReadyPromise;
-    const tagged = rows.map((row) => {
-      const out = { __platform: f.platform, __file: f.name, __filePath: f.path, __productType: productType, ...row };
-      out.__date = dateCol ? parseDateLoose(row[dateCol]) : null;
+    // 방금 읽은 행 객체를 복사하지 않고 그대로 태그를 붙인다(수십만 행을
+    // 복사하면 메모리가 두 배로 든다).
+    const tagged = rows;
+    for (const out of tagged) {
+      out.__platform = f.platform;
+      out.__file = f.name;
+      out.__filePath = f.path;
+      out.__productType = productType;
+      out.__date = dateCol ? parseDateLoose(out[dateCol]) : null;
       if (f.platform === "coupang") {
         const cls = resolveItemClassification(out, f.path, f.platform, productType);
         out.__item = cls.item;
@@ -857,8 +867,7 @@
         out.__item = null;
         out.__subItem = null;
       }
-      return out;
-    });
+    }
     if (aggregateKeywords && f.platform === "coupang") {
       const keywordCol = resolveFieldForCols(cols, "coupang", "keyword");
       if (keywordCol) return aggregateKeywordRows(tagged, cols);
@@ -886,23 +895,30 @@
 
   // "리포트RAW 다운받기"의 CE_RAW/MX_RAW(키워드별 1:1)와 쿠팡 키워드_RAW는
   // 키워드 단위가 꼭 필요해서, 평소 표1~4가 쓰는 가벼운 state.rows가 아니라
-  // 클릭했을 때만 쿠팡 파일들을 다시 받아서 키워드를 합치지 않고 그대로 쓴다.
-  async function fetchFullCoupangRows() {
-    // colsByFile에 남아있는(키워드가 빠진) 가벼운 버전 캐시를 비워야, 이번에
-    // 다시 받는 전체 행에서 "키워드" 컬럼이 제대로 잡힌다.
+  // 클릭했을 때만 쿠팡 파일들의 다운로드용 캐시(키워드를 합치지 않은 것)를
+  // 받아서 build(rows)에 넘긴다. 그동안 state.colsByFile은 다운로드용 행의
+  // 컬럼으로 바뀌고(그래야 "키워드" 등이 잡힘), 끝나면 대시보드용으로
+  // 되돌린다(다운로드용 캐시엔 표4의 "광고전환매출발생 상품명"이 없다).
+  async function withFullCoupangRows(build) {
+    const savedCols = new Map(state.colsByFile);
     fieldResolutionCache = new Map();
-    const files = state.manifest.files.filter((f) => f.platform === "coupang");
-    const perFileRows = await Promise.all(
-      files.map(async (f) => {
-        try {
-          return await loadAndTagFile(f, false);
-        } catch (e) {
-          console.error("파일을 불러오지 못했습니다:", f.path, e);
-          return [];
-        }
-      })
-    );
-    return perFileRows.flat();
+    try {
+      const files = state.manifest.files.filter((f) => f.platform === "coupang");
+      const perFileRows = await Promise.all(
+        files.map(async (f) => {
+          try {
+            return await loadAndTagFile(f, false);
+          } catch (e) {
+            console.error("파일을 불러오지 못했습니다:", f.path, e);
+            return [];
+          }
+        })
+      );
+      return build(perFileRows.flat());
+    } finally {
+      state.colsByFile = savedCols;
+      fieldResolutionCache = new Map();
+    }
   }
 
   // ---------- 집계 ----------
@@ -1297,8 +1313,8 @@
   }
 
   // 쿠팡 탭에 지금 적용된 필터(년도/월/광고상품유형/품목) 기준으로 CE_RAW,
-  // MX_RAW, 그리고 그 둘을 합친 ce,mx 전체_raw 행을 만든다.
-  function buildWeeklyRawSheets(rows) {
+  // MX_RAW 행(배열)을 만든다.
+  function buildWeeklyRawRows(rows) {
     const ceRows = [];
     const mxRows = [];
     for (const row of rows) {
@@ -1307,11 +1323,7 @@
       if (!built) continue;
       (built.division === "CE" ? ceRows : mxRows).push(built.values);
     }
-    return {
-      CE_RAW: XLSX.utils.aoa_to_sheet([WEEKLY_RAW_HEADER, ...ceRows]),
-      MX_RAW: XLSX.utils.aoa_to_sheet([WEEKLY_RAW_HEADER, ...mxRows]),
-      "ce,mx 전체_raw": XLSX.utils.aoa_to_sheet([WEEKLY_RAW_HEADER, ...ceRows, ...mxRows]),
-    };
+    return { ceRows, mxRows };
   }
 
 
@@ -1439,10 +1451,10 @@
     ]);
   }
 
-  // 쿠팡 키워드_RAW: PA만 대상으로, 날짜+캠페인ID+캠페인명+VIID+키워드
-  // 단위로(그룹 구분 없이) 합산. 날짜는 년/월/일로 나눠 담는다.
+  // 쿠팡 키워드_RAW: PA만 대상으로, 년+월+캠페인ID+캠페인명+VIID+키워드
+  // 단위로(그룹·일자 구분 없이) 월별 합산.
   const KEYWORD_HEADER = [
-    "년", "월", "일", "품목", "광고유형", "캠페인ID", "캠페인명", "광고집행상품 VIID", "키워드",
+    "년", "월", "품목", "광고유형", "캠페인ID", "캠페인명", "광고집행상품 VIID", "키워드",
     "노출수", "클릭수", "광고비",
     "총 판매수량(1일)", "직접 판매수량(1일)", "총 전환매출액(1일)", "직접 전환매출액(1일)",
     "총 판매수량(14일)", "직접 판매수량(14일)", "총 전환매출액(14일)", "직접 전환매출액(14일)",
@@ -1466,25 +1478,259 @@
       const campaignRaw = weeklyRawText(row, fp, platform, "campaign");
       const viidRaw = weeklyRawText(row, fp, platform, "viid");
       const keywordRaw = weeklyRawText(row, fp, platform, "keyword");
-      const key = [date, campaignIdRaw, campaignRaw, viidRaw, keywordRaw].join("\u0001");
+      const year = yearOf(date);
+      const month = monthOf(date);
+      const key = [year, month, campaignIdRaw, campaignRaw, viidRaw, keywordRaw].join("\u0001");
       if (!groups.has(key)) {
-        groups.set(key, { date, productType, item, subItem, campaignIdRaw, campaignRaw, viidRaw, keywordRaw, metrics: {} });
+        groups.set(key, { year, month, productType, item, subItem, campaignIdRaw, campaignRaw, viidRaw, keywordRaw, metrics: {} });
       }
       sumWeeklyMetrics(row, fp, platform, groups.get(key).metrics);
     }
     return [...groups.values()].map((g) => [
-      Number(yearOf(g.date)),
-      Number(monthOf(g.date)),
-      Number(g.date.slice(8, 10)),
+      Number(g.year),
+      Number(g.month),
       g.item,
       g.productType,
       g.campaignIdRaw,
       g.campaignRaw,
       g.viidRaw,
       g.keywordRaw,
-      ...weeklyMetricValues(g.metrics),
+      ...keywordMetricValues(g.metrics),
       g.subItem,
     ]);
+  }
+
+  // 쿠팡 키워드_RAW 양식은 지표 순서가 "노출수, 클릭수, 광고비, ..."라서
+  // (다른 시트는 "광고비, 노출수, 클릭수, ...") 앞의 세 개 순서를 맞춘다.
+  function keywordMetricValues(metrics) {
+    const [cost, impressions, clicks, ...rest] = weeklyMetricValues(metrics);
+    return [impressions, clicks, cost, ...rest];
+  }
+
+  // ---------- 대용량 xlsx 직접 쓰기 ----------
+  // CE_RAW는 원본 키워드 리포트 행 그대로라 20만 행이 넘는다. SheetJS는 시트
+  // 하나의 모든 칸(20만 x 25 = 500만 개)을 객체 하나에 담았다가 한 번에
+  // 쓰기 때문에, 브라우저 메모리를 2.5GB 넘게 쓰고 행이 조금만 더 늘면
+  // 브라우저 자체 한도("invalid table size")에 걸려 아예 실패한다. 그래서
+  // 이 다운로드는 시트 XML을 몇 천 행씩 바로 압축하면서 xlsx(zip)로 직접
+  // 쓴다 - 메모리를 거의 안 쓰고 행 수에 상관없이 동작한다.
+  const CRC32_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+
+  function crc32Update(crc, bytes) {
+    let c = crc ^ 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) c = CRC32_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+
+  // produce(write)가 write(Uint8Array)로 넘겨주는 내용을 zip 항목 하나로
+  // 만든다. 브라우저가 CompressionStream("deflate-raw")를 지원하면 압축하고,
+  // 아니면 압축 없이 그대로 담는다(파일만 커질 뿐 똑같이 열린다).
+  async function makeZipEntry(name, produce) {
+    let crc = 0;
+    let size = 0;
+    let stream = null;
+    try {
+      if (typeof CompressionStream !== "undefined") stream = new CompressionStream("deflate-raw");
+    } catch (e) {
+      stream = null;
+    }
+    const parts = [];
+    let compSize = 0;
+    if (!stream) {
+      await produce(async (bytes) => {
+        crc = crc32Update(crc, bytes);
+        size += bytes.length;
+        parts.push(bytes);
+      });
+      return { name, parts, crc, size, compSize: size, method: 0 };
+    }
+    const writer = stream.writable.getWriter();
+    const reader = stream.readable.getReader();
+    const reading = (async () => {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parts.push(value);
+        compSize += value.length;
+      }
+    })();
+    await produce(async (bytes) => {
+      crc = crc32Update(crc, bytes);
+      size += bytes.length;
+      await writer.write(bytes);
+    });
+    await writer.close();
+    await reading;
+    return { name, parts, crc, size, compSize, method: 8 };
+  }
+
+  function zipToBlob(entries) {
+    const enc = new TextEncoder();
+    const out = [];
+    const central = [];
+    let offset = 0;
+    for (const e of entries) {
+      const nameBytes = enc.encode(e.name);
+      const local = new DataView(new ArrayBuffer(30));
+      local.setUint32(0, 0x04034b50, true);
+      local.setUint16(4, 20, true);
+      local.setUint16(6, 0x0800, true); // 파일명 UTF-8
+      local.setUint16(8, e.method, true);
+      local.setUint16(10, 0, true);
+      local.setUint16(12, 0x21, true); // 1980-01-01
+      local.setUint32(14, e.crc, true);
+      local.setUint32(18, e.compSize, true);
+      local.setUint32(22, e.size, true);
+      local.setUint16(26, nameBytes.length, true);
+      local.setUint16(28, 0, true);
+      out.push(local, nameBytes, ...e.parts);
+      const cd = new DataView(new ArrayBuffer(46));
+      cd.setUint32(0, 0x02014b50, true);
+      cd.setUint16(4, 20, true);
+      cd.setUint16(6, 20, true);
+      cd.setUint16(8, 0x0800, true);
+      cd.setUint16(10, e.method, true);
+      cd.setUint16(12, 0, true);
+      cd.setUint16(14, 0x21, true);
+      cd.setUint32(16, e.crc, true);
+      cd.setUint32(20, e.compSize, true);
+      cd.setUint32(24, e.size, true);
+      cd.setUint16(28, nameBytes.length, true);
+      cd.setUint32(42, offset, true);
+      central.push(cd, nameBytes);
+      offset += 30 + nameBytes.length + e.compSize;
+    }
+    const cdSize = central.reduce((n, part) => n + part.byteLength, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true);
+    end.setUint16(8, entries.length, true);
+    end.setUint16(10, entries.length, true);
+    end.setUint32(12, cdSize, true);
+    end.setUint32(16, offset, true);
+    return new Blob([...out, ...central, end], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+  }
+
+  function xmlEscape(v) {
+    return String(v)
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function columnLetter(i) {
+    let s = "";
+    for (let n = i + 1; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s;
+    return s;
+  }
+
+  const XLSX_MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+  const XLSX_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+  const XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+
+  // sheets: [{ name, header, rows }] (rows는 값 배열의 배열). 숫자는 숫자
+  // 칸으로, 그 외는 글자 칸으로 쓴다.
+  async function downloadLargeXlsx(fileName, sheets) {
+    const enc = new TextEncoder();
+    const textEntry = (name, text) => makeZipEntry(name, (write) => write(enc.encode(text)));
+    const entries = [];
+    for (let si = 0; si < sheets.length; si++) {
+      const { header, rows } = sheets[si];
+      const width = Math.max(header.length, ...rows.slice(0, 1).map((r) => r.length));
+      const letters = Array.from({ length: width }, (_, i) => columnLetter(i));
+      const rowXml = (values, r) => {
+        let x = `<row r="${r}">`;
+        for (let c = 0; c < values.length; c++) {
+          const v = values[c];
+          if (v == null || v === "") continue;
+          const ref = letters[c] || columnLetter(c);
+          if (typeof v === "number") {
+            if (Number.isFinite(v)) x += `<c r="${ref}${r}"><v>${v}</v></c>`;
+          } else {
+            x += `<c r="${ref}${r}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(v)}</t></is></c>`;
+          }
+        }
+        return x + "</row>";
+      };
+      entries.push(
+        await makeZipEntry(`xl/worksheets/sheet${si + 1}.xml`, async (write) => {
+          await write(enc.encode(`${XML_HEAD}<worksheet xmlns="${XLSX_MAIN_NS}"><sheetData>${rowXml(header, 1)}`));
+          const CHUNK = 2000;
+          for (let i = 0; i < rows.length; i += CHUNK) {
+            let x = "";
+            const stop = Math.min(rows.length, i + CHUNK);
+            for (let j = i; j < stop; j++) x += rowXml(rows[j], j + 2);
+            await write(enc.encode(x));
+          }
+          await write(enc.encode("</sheetData></worksheet>"));
+        })
+      );
+    }
+    const sheetList = sheets
+      .map((sh, i) => `<sheet name="${xmlEscape(sh.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`)
+      .join("");
+    entries.push(
+      await textEntry(
+        "[Content_Types].xml",
+        `${XML_HEAD}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+          '<Default Extension="xml" ContentType="application/xml"/>' +
+          '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+          '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
+          sheets
+            .map((_, i) => `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`)
+            .join("") +
+          "</Types>"
+      ),
+      await textEntry(
+        "_rels/.rels",
+        `${XML_HEAD}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+          `<Relationship Id="rId1" Type="${XLSX_REL_NS}/officeDocument" Target="xl/workbook.xml"/></Relationships>`
+      ),
+      await textEntry(
+        "xl/workbook.xml",
+        `${XML_HEAD}<workbook xmlns="${XLSX_MAIN_NS}" xmlns:r="${XLSX_REL_NS}"><sheets>${sheetList}</sheets></workbook>`
+      ),
+      await textEntry(
+        "xl/_rels/workbook.xml.rels",
+        `${XML_HEAD}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+          sheets
+            .map((_, i) => `<Relationship Id="rId${i + 1}" Type="${XLSX_REL_NS}/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`)
+            .join("") +
+          `<Relationship Id="rId${sheets.length + 1}" Type="${XLSX_REL_NS}/styles" Target="styles.xml"/></Relationships>`
+      ),
+      await textEntry(
+        "xl/styles.xml",
+        `${XML_HEAD}<styleSheet xmlns="${XLSX_MAIN_NS}">` +
+          '<fonts count="1"><font><sz val="11"/><name val="맑은 고딕"/></font></fonts>' +
+          '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
+          '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>' +
+          '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+          '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>' +
+          '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>' +
+          "</styleSheet>"
+      )
+    );
+    const blob = zipToBlob(entries);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
 
   el("downloadReportBtn").addEventListener("click", async () => {
@@ -1494,30 +1740,19 @@
     btn.textContent = "리포트 준비 중...";
     try {
       // CE_RAW/MX_RAW/쿠팡 키워드_RAW는 키워드 단위가 꼭 필요해서, 평소
-      // 표1~4가 쓰는 가벼운 state.rows 대신 지금 클릭한 시점에 쿠팡 파일을
-      // 다시 받아서(키워드를 합치지 않은 채로) 쓴다.
-      const fullRows = await fetchFullCoupangRows();
-      const workbook = XLSX.utils.book_new();
-      const rawSheets = buildWeeklyRawSheets(fullRows);
-      for (const name of Object.keys(rawSheets)) {
-        XLSX.utils.book_append_sheet(workbook, rawSheets[name], name);
-      }
-      XLSX.utils.book_append_sheet(
-        workbook,
-        XLSX.utils.aoa_to_sheet([MONTHLY_RAW_HEADER, ...buildMonthlyRawRows(fullRows)]),
-        "쿠팡_RAW"
-      );
-      XLSX.utils.book_append_sheet(
-        workbook,
-        XLSX.utils.aoa_to_sheet([CONVERSION_PRODUCT_HEADER, ...buildConversionProductRows(fullRows)]),
-        "쿠팡_전환상품_RAW"
-      );
-      XLSX.utils.book_append_sheet(
-        workbook,
-        XLSX.utils.aoa_to_sheet([KEYWORD_HEADER, ...buildKeywordRows(fullRows)]),
-        "쿠팡 키워드_RAW"
-      );
-      XLSX.writeFile(workbook, `쿠팡_상품광고_주간리포트_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      // 표1~4가 쓰는 가벼운 state.rows 대신 지금 클릭한 시점에 쿠팡 파일의
+      // 다운로드용 캐시(키워드를 합치지 않은 것)를 받아서 쓴다.
+      const sheets = await withFullCoupangRows((fullRows) => {
+        const { ceRows, mxRows } = buildWeeklyRawRows(fullRows);
+        return [
+          { name: "CE_RAW", header: WEEKLY_RAW_HEADER, rows: ceRows },
+          { name: "MX_RAW", header: WEEKLY_RAW_HEADER, rows: mxRows },
+          { name: "쿠팡_RAW", header: MONTHLY_RAW_HEADER, rows: buildMonthlyRawRows(fullRows) },
+          { name: "쿠팡_전환상품_RAW", header: CONVERSION_PRODUCT_HEADER, rows: buildConversionProductRows(fullRows) },
+          { name: "쿠팡 키워드_RAW", header: KEYWORD_HEADER, rows: buildKeywordRows(fullRows) },
+        ];
+      });
+      await downloadLargeXlsx(`쿠팡_상품광고_주간리포트_${new Date().toISOString().slice(0, 10)}.xlsx`, sheets);
     } catch (e) {
       console.error("리포트RAW를 만들지 못했습니다:", e);
       alert("리포트RAW를 만드는 중 문제가 생겼습니다. 다시 시도해주세요.");
