@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>쿠팡 · 네이버 광고 리포트</title>
-<link rel="stylesheet" href="assets/style.css?v=10" />
+<link rel="stylesheet" href="assets/style.css?v=11" />
 </head>
 <body class="locked">
 <div class="lock-screen" id="lockScreen">
@@ -36,127 +36,133 @@
     <span>raw 데이터를 불러오는 중입니다... 처음 로딩은 데이터 양에 따라 몇 초~십수 초 걸릴 수 있어요.</span>
   </div>
 
-  <div class="card" id="slicerCard">
-    <div class="filter-head">
-      <h2>필터</h2>
-      <button type="button" class="filter-reset" id="filterResetBtn" disabled>필터 초기화</button>
-    </div>
-    <div class="filter-row">
-      <div class="filter-group">
-        <span class="label">년도</span>
-        <div class="chip-list" id="yearSlicer"></div>
-      </div>
-      <div class="filter-group">
-        <span class="label">월</span>
-        <div class="chip-list" id="monthSlicer"></div>
-      </div>
-      <div class="filter-group">
-        <span class="label">주차</span>
-        <div class="chip-list" id="weekSlicer"></div>
-      </div>
-      <div class="filter-group" id="divisionFilterGroup">
-        <span class="label">구분</span>
-        <div class="chip-list" id="divisionSlicer"></div>
-      </div>
-      <div class="filter-group">
-        <span class="label">광고상품유형</span>
-        <div class="chip-list" id="productTypeSlicer"></div>
-      </div>
-      <div class="filter-group" id="itemFilterGroup">
-        <span class="label">품목</span>
-        <div class="chip-list" id="itemCategorySlicer"></div>
-      </div>
-      <div class="filter-group" id="subItemFilterGroup">
-        <span class="label">상세 품목</span>
-        <div class="chip-list" id="subItemSlicer"></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="card" id="chartCard">
-    <h2>일자별 광고비 · ROAS 추이</h2>
-    <div class="chart-legend">
-      <span><span class="legend-swatch legend-bar"></span>광고비 (왼쪽 축)</span>
-      <span><span class="legend-swatch legend-line"></span>ROAS (오른쪽 축)</span>
-      <span><span class="legend-swatch legend-week"></span>주차 구분</span>
-    </div>
-    <div class="chart-wrap">
-      <div id="dailyChart" class="chart-area"></div>
-      <div id="chartTooltip" class="chart-tooltip" hidden></div>
-    </div>
-  </div>
-
-  <div class="card" id="table3Card">
-    <h2>주차별 데이터</h2>
-    <div class="table-scroll">
-      <table>
-        <thead id="table3Head"></thead>
-        <tbody id="table3Body"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="card" id="table2Card">
-    <h2>광고 상품별 데이터</h2>
-    <div class="table-scroll">
-      <table>
-        <thead id="table2Head"></thead>
-        <tbody id="table2Body"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="card" id="table4Card">
-    <h2>판매 우수 상품 TOP 10</h2>
-    <div class="top10-layout">
-      <div class="table-scroll">
-        <table>
-          <thead id="table4Head"></thead>
-          <tbody id="table4Body"></tbody>
-        </table>
-      </div>
-      <div class="top10-pie">
-        <div class="top10-pie-title">매출 비중</div>
-        <div class="chart-wrap">
-          <div id="top10Pie" class="pie-area"></div>
-          <div id="top10PieTooltip" class="chart-tooltip" hidden></div>
+  <!-- PC에서는 필터를 왼쪽 사이드바에 고정(스크롤해도 따라옴), 좁은 화면에서는 위로 -->
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="card" id="slicerCard">
+        <div class="filter-head">
+          <h2>필터</h2>
+          <button type="button" class="filter-reset" id="filterResetBtn" disabled>필터 초기화</button>
         </div>
-        <ul id="top10PieLegend" class="pie-legend"></ul>
+        <div class="filter-row">
+          <div class="filter-group">
+            <span class="label">년도</span>
+            <div class="chip-list" id="yearSlicer"></div>
+          </div>
+          <div class="filter-group">
+            <span class="label">월</span>
+            <div class="chip-list" id="monthSlicer"></div>
+          </div>
+          <div class="filter-group">
+            <span class="label">주차</span>
+            <div class="chip-list" id="weekSlicer"></div>
+          </div>
+          <div class="filter-group" id="divisionFilterGroup">
+            <span class="label">구분</span>
+            <div class="chip-list" id="divisionSlicer"></div>
+          </div>
+          <div class="filter-group">
+            <span class="label">광고상품유형</span>
+            <div class="chip-list" id="productTypeSlicer"></div>
+          </div>
+          <div class="filter-group" id="itemFilterGroup">
+            <span class="label">품목</span>
+            <div class="chip-list" id="itemCategorySlicer"></div>
+          </div>
+          <div class="filter-group" id="subItemFilterGroup">
+            <span class="label">상세 품목</span>
+            <div class="chip-list" id="subItemSlicer"></div>
+          </div>
+        </div>
       </div>
-    </div>
-  </div>
+    </aside>
+    <main class="main-col">
+      <div class="card" id="chartCard">
+        <h2>일자별 광고비 · ROAS 추이</h2>
+        <div class="chart-legend">
+          <span><span class="legend-swatch legend-bar"></span>광고비 (왼쪽 축)</span>
+          <span><span class="legend-swatch legend-line"></span>ROAS (오른쪽 축)</span>
+          <span><span class="legend-swatch legend-week"></span>주차 구분</span>
+        </div>
+        <div class="chart-wrap">
+          <div id="dailyChart" class="chart-area"></div>
+          <div id="chartTooltip" class="chart-tooltip" hidden></div>
+        </div>
+      </div>
 
-  <div class="card" id="table1Card">
-    <div class="toolbar">
-      <h2 style="margin:0;" id="table1Title">품목별 데이터</h2>
-    </div>
-    <div class="table-scroll">
-      <table>
-        <thead id="table1Head"></thead>
-        <tbody id="table1Body"></tbody>
-      </table>
-    </div>
-    <div class="pagination">
-      <span id="table1PageInfo"></span>
-      <button id="table1PrevBtn" type="button">이전</button>
-      <button id="table1NextBtn" type="button">다음</button>
-    </div>
-  </div>
+      <div class="card" id="table3Card">
+        <h2>주차별 데이터</h2>
+        <div class="table-scroll">
+          <table>
+            <thead id="table3Head"></thead>
+            <tbody id="table3Body"></tbody>
+          </table>
+        </div>
+      </div>
 
-  <div class="card" id="rawDownloadCard">
-    <h2>원본 다운로드</h2>
-    <div class="toolbar-actions">
-      <button class="primary platform-only" data-platform="coupang" id="downloadReportBtn" type="button">리포트RAW 다운받기</button>
-      <button class="primary platform-only" data-platform="naver" id="downloadGfaReportBtn" type="button">GFA리포트RAW 다운받기</button>
-      <button class="primary platform-only" data-platform="naver" id="downloadShoppingSearchBtn" type="button">쇼핑검색광고(카탈로그형) RAW 다운받기</button>
-    </div>
-  </div>
+      <div class="card" id="table2Card">
+        <h2>광고 상품별 데이터</h2>
+        <div class="table-scroll">
+          <table>
+            <thead id="table2Head"></thead>
+            <tbody id="table2Body"></tbody>
+          </table>
+        </div>
+      </div>
 
-  <div class="card">
-    <h2>업로드된 파일</h2>
-    <div id="fileNoticeArea" class="file-list">
-      <div class="empty-state">불러오는 중...</div>
-    </div>
+      <div class="card" id="table4Card">
+        <h2>판매 우수 상품 TOP 10</h2>
+        <div class="top10-layout">
+          <div class="table-scroll">
+            <table>
+              <thead id="table4Head"></thead>
+              <tbody id="table4Body"></tbody>
+            </table>
+          </div>
+          <div class="top10-pie">
+            <div class="top10-pie-title">매출 비중</div>
+            <div class="chart-wrap">
+              <div id="top10Pie" class="pie-area"></div>
+              <div id="top10PieTooltip" class="chart-tooltip" hidden></div>
+            </div>
+            <ul id="top10PieLegend" class="pie-legend"></ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="table1Card">
+        <div class="toolbar">
+          <h2 style="margin:0;" id="table1Title">품목별 데이터</h2>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead id="table1Head"></thead>
+            <tbody id="table1Body"></tbody>
+          </table>
+        </div>
+        <div class="pagination">
+          <span id="table1PageInfo"></span>
+          <button id="table1PrevBtn" type="button">이전</button>
+          <button id="table1NextBtn" type="button">다음</button>
+        </div>
+      </div>
+
+      <div class="card" id="rawDownloadCard">
+        <h2>원본 다운로드</h2>
+        <div class="toolbar-actions">
+          <button class="primary platform-only" data-platform="coupang" id="downloadReportBtn" type="button">리포트RAW 다운받기</button>
+          <button class="primary platform-only" data-platform="naver" id="downloadGfaReportBtn" type="button">GFA리포트RAW 다운받기</button>
+          <button class="primary platform-only" data-platform="naver" id="downloadShoppingSearchBtn" type="button">쇼핑검색광고(카탈로그형) RAW 다운받기</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>업로드된 파일</h2>
+        <div id="fileNoticeArea" class="file-list">
+          <div class="empty-state">불러오는 중...</div>
+        </div>
+      </div>
+    </main>
   </div>
 
   <footer>그래프와 표는 raw 데이터를 자동으로 합산해서 계산한 값입니다. 원본 그대로는 위 "원본 다운로드"에서 받을 수 있습니다.</footer>
@@ -165,6 +171,6 @@
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <!-- app.js를 바꿀 때마다 아래 v= 숫자를 올려서, 예전 파일이 브라우저에 캐시되어 남아있는 문제를 방지합니다. -->
-<script src="assets/app.js?v=36"></script>
+<script src="assets/app.js?v=37"></script>
 </body>
 </html>

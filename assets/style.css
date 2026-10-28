@@ -77,7 +77,7 @@ body {
 }
 
 .page {
-  max-width: 1180px;
+  max-width: 1480px;
   margin: 0 auto;
   padding: 20px 20px 64px;
 }
@@ -879,4 +879,68 @@ tbody tr.total-row td {
   padding: 6px 0;
   font-size: 12px;
   color: var(--text-muted);
+}
+
+/* ---------- 필터 왼쪽 사이드바 ---------- */
+.layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.main-col {
+  min-width: 0;
+}
+
+/* 스크롤해도 필터가 화면 왼쪽에 붙어 있게. 필터가 화면보다 길면 안에서 스크롤 */
+.sidebar {
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+
+/* 사이드바 안에서는 기준 이름을 버튼 위에 둔다(폭이 좁아서) */
+.sidebar .filter-group {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.sidebar .filter-group .label {
+  padding-top: 0;
+}
+
+.sidebar .slicer-btn {
+  padding: 4px 11px;
+  font-size: 12.5px;
+}
+
+/* 좁은 화면(태블릿/모바일)에서는 예전처럼 필터를 위에 */
+@media (max-width: 1100px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .sidebar .filter-group {
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .sidebar .filter-group .label {
+    padding-top: 7px;
+  }
+}
+
+@media (max-width: 600px) {
+  .sidebar .filter-group {
+    grid-template-columns: 78px minmax(0, 1fr);
+    gap: 8px;
+  }
 }

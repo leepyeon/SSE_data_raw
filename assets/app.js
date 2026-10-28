@@ -2004,6 +2004,112 @@
     ]);
   }
 
+  // ---------- 코멘트 시트 (숨김) ----------
+  // 품목별·월별로 광고비/매출/ROAS, 사업부(CE/MX) 안 비중, 사업부 평균 ROAS와
+  // 비교, 전월 대비 증감, 매출 1위 상품, 광고상품 구성을 한 문단으로 쓴다.
+  // 지금 쿠팡 탭 필터 조건이 그대로 반영된다.
+  const COMMENT_HEADER = [
+    "집행 년", "집행 월", "구분", "품목", "광고비", "전환매출", "ROAS(%)",
+    "전월 대비 광고비(%)", "전월 대비 전환매출(%)", "매출 1위 상품", "코멘트",
+  ];
+
+  // 코멘트용 금액 표기: 1억 이상은 "83.6억원", 1만 이상은 "6,840만원"
+  function koreanMoney(v) {
+    if (!Number.isFinite(v)) return "-";
+    const a = Math.abs(v);
+    if (a >= 1e8) return `${(v / 1e8).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}억원`;
+    if (a >= 1e4) return `${Math.round(v / 1e4).toLocaleString("ko-KR")}만원`;
+    return `${Math.round(v).toLocaleString("ko-KR")}원`;
+  }
+
+  function signedPct(v, digits = 1) {
+    if (!Number.isFinite(v)) return "-";
+    return `${v > 0 ? "+" : ""}${v.toLocaleString("ko-KR", { maximumFractionDigits: digits })}%`;
+  }
+
+  function buildItemCommentRows(rows) {
+    const platform = "coupang";
+    const items = new Map(); // 년|월|구분|품목 -> 집계
+    const divisions = new Map(); // 년|월|구분 -> {cost, revenue}
+    for (const row of rows) {
+      if (row.__platform !== platform) continue;
+      const fp = row.__filePath;
+      const productType = row.__productType;
+      const date = row.__date;
+      if (!date) continue;
+      const item = row.__item;
+      const division = classifyDivision(item);
+      if (!division || !passesFilters(platform, date, productType, item, row.__subItem)) continue;
+      const year = yearOf(date);
+      const month = Number(monthOf(date));
+      const key = `${year}|${month}|${division}|${item}`;
+      let g = items.get(key);
+      if (!g) {
+        g = { year, month, division, item, metrics: {}, byType: new Map(), byProduct: new Map() };
+        items.set(key, g);
+      }
+      const m = {};
+      sumWeeklyMetrics(row, fp, platform, m);
+      for (const k of Object.keys(m)) g.metrics[k] = (g.metrics[k] || 0) + m[k];
+      const cost = m.cost || 0;
+      const revenue = m.revenue || 0;
+      g.byType.set(productType, (g.byType.get(productType) || 0) + cost);
+      const campaignCol = resolveField(fp, platform, "campaign");
+      const groupCol = resolveField(fp, platform, "group");
+      const label = resolveProductLabel(row, fp, platform, productType,
+        campaignCol ? row[campaignCol] ?? "" : "", groupCol ? row[groupCol] ?? "" : "");
+      g.byProduct.set(label, (g.byProduct.get(label) || 0) + revenue);
+      const dKey = `${year}|${month}|${division}`;
+      const d = divisions.get(dKey) || { cost: 0, revenue: 0 };
+      d.cost += cost;
+      d.revenue += revenue;
+      divisions.set(dKey, d);
+    }
+    const out = [];
+    const sorted = [...items.values()].sort((a, b) =>
+      a.year.localeCompare(b.year) || a.month - b.month || a.division.localeCompare(b.division) || a.item.localeCompare(b.item, "ko"));
+    for (const g of sorted) {
+      const cost = g.metrics.cost || 0;
+      const revenue = g.metrics.revenue || 0;
+      const roas = cost > 0 ? (revenue / cost) * 100 : null;
+      const d = divisions.get(`${g.year}|${g.month}|${g.division}`);
+      const divRoas = d && d.cost > 0 ? (d.revenue / d.cost) * 100 : null;
+      const share = d && d.cost > 0 ? (cost / d.cost) * 100 : null;
+      // 전월(같은 품목) - 1월이면 전년 12월
+      const prevYear = g.month === 1 ? String(Number(g.year) - 1) : g.year;
+      const prevMonth = g.month === 1 ? 12 : g.month - 1;
+      const prev = items.get(`${prevYear}|${prevMonth}|${g.division}|${g.item}`);
+      const pc = prev && prev.metrics.cost > 0 ? (cost / prev.metrics.cost - 1) * 100 : null;
+      const pr = prev && prev.metrics.revenue > 0 ? (revenue / prev.metrics.revenue - 1) * 100 : null;
+      const [topName, topRev] = [...g.byProduct].sort((a, b) => b[1] - a[1])[0] || ["", 0];
+      const topShort = String(topName).split(",")[0].slice(0, 40);
+      const parts = [];
+      parts.push(`광고비 ${koreanMoney(cost)}${Number.isFinite(share) ? `(${g.division} 광고비의 ${share.toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%)` : ""}, ` +
+        `전환매출 ${koreanMoney(revenue)}, ROAS ${formatMetric(roas, "pct0")}` +
+        (Number.isFinite(roas) && Number.isFinite(divRoas)
+          ? `로 ${g.division} 평균(${formatMetric(divRoas, "pct0")})보다 ${roas >= divRoas ? "높습니다" : "낮습니다"}.`
+          : "입니다."));
+      parts.push(prev
+        ? `전월 대비 광고비 ${signedPct(pc)}, 전환매출 ${signedPct(pr)}.`
+        : "전월 데이터가 없어 증감은 비교하지 않았습니다.");
+      if (topRev > 0) {
+        parts.push(`매출 1위 상품은 '${topShort}'(${koreanMoney(topRev)}, 품목 매출의 ${((topRev / revenue) * 100).toLocaleString("ko-KR", { maximumFractionDigits: 1 })}%)입니다.`);
+      }
+      const typeMix = [...g.byType].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+      if (typeMix.length > 1 && cost > 0) {
+        parts.push(`광고비 구성은 ${typeMix.map(([t, v]) => `${t} ${Math.round((v / cost) * 100)}%`).join(", ")}입니다.`);
+      }
+      out.push([
+        `${g.year}년`, `${g.month}월`, g.division, g.item,
+        Math.round(cost), Math.round(revenue), Number.isFinite(roas) ? Math.round(roas) : "-",
+        Number.isFinite(pc) ? Math.round(pc * 10) / 10 : "-", Number.isFinite(pr) ? Math.round(pr * 10) / 10 : "-",
+        topRev > 0 ? topShort : "-",
+        parts.join(" "),
+      ]);
+    }
+    return out;
+  }
+
   // 쿠팡 키워드_RAW: PA만 대상으로, 년+월+캠페인ID+캠페인명+VIID+키워드
   // 단위로(그룹·일자 구분 없이) 월별 합산.
   const KEYWORD_HEADER = [
@@ -2192,8 +2298,9 @@
   const XLSX_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
   const XML_HEAD = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
 
-  // sheets: [{ name, header, rows }] (rows는 값 배열의 배열). 숫자는 숫자
-  // 칸으로, 그 외는 글자 칸으로 쓴다.
+  // sheets: [{ name, header, rows, hidden }] (rows는 값 배열의 배열). 숫자는
+  // 숫자 칸으로, 그 외는 글자 칸으로 쓴다. hidden이면 숨김 시트로 넣는다
+  // (엑셀 "시트 숨기기 취소"로 볼 수 있음).
   async function downloadLargeXlsx(fileName, sheets) {
     const enc = new TextEncoder();
     const textEntry = (name, text) => makeZipEntry(name, (write) => write(enc.encode(text)));
@@ -2231,7 +2338,7 @@
       );
     }
     const sheetList = sheets
-      .map((sh, i) => `<sheet name="${xmlEscape(sh.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`)
+      .map((sh, i) => `<sheet name="${xmlEscape(sh.name)}" sheetId="${i + 1}"${sh.hidden ? ' state="hidden"' : ""} r:id="rId${i + 1}"/>`)
       .join("");
     entries.push(
       await textEntry(
@@ -2303,6 +2410,8 @@
           { name: "쿠팡_RAW", header: MONTHLY_RAW_HEADER, rows: buildMonthlyRawRows(fullRows) },
           { name: "쿠팡_전환상품_RAW", header: CONVERSION_PRODUCT_HEADER, rows: buildConversionProductRows(fullRows) },
           { name: "쿠팡 키워드_RAW", header: KEYWORD_HEADER, rows: buildKeywordRows(fullRows) },
+          // 품목별·월별 코멘트 - 숨김 시트(엑셀에서 "숨기기 취소"로 볼 수 있음)
+          { name: "코멘트", header: COMMENT_HEADER, rows: buildItemCommentRows(fullRows), hidden: true },
         ];
       });
       await downloadLargeXlsx(`쿠팡_상품광고_주간리포트_${new Date().toISOString().slice(0, 10)}.xlsx`, sheets);
