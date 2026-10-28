@@ -29,7 +29,8 @@ CACHE_DIR = ROOT / "data" / "cache" / "coupang"
 
 KEYWORD_COL = "키워드"
 # 대시보드가 쓰는 차원(날짜/품목 조회 키/표4 상품명)은 그대로 두고 키워드만 합친다.
-GROUP_COLS = ["날짜", "캠페인 ID", "캠페인명", "광고그룹", "광고집행 옵션ID", "광고집행 상품명"]
+# "광고 노출 지면"(검색/비검색/외부 채널)은 광고 상품별 데이터 표의 노출 지면별 성과용.
+GROUP_COLS = ["날짜", "캠페인 ID", "캠페인명", "광고그룹", "광고집행 옵션ID", "광고집행 상품명", "광고 노출 지면"]
 METRIC_COLS = ["광고비", "노출수", "클릭수", "직접 판매수량(1일)", "직접 전환매출액(1일)"]
 
 # 다운로드(CE_RAW/MX_RAW, 쿠팡_RAW, 쿠팡_전환상품_RAW, 쿠팡 키워드_RAW)와
@@ -40,6 +41,11 @@ FULL_METRIC_COLS = [
     "총 판매수량(1일)", "직접 판매수량(1일)", "총 전환매출액(1일)", "직접 전환매출액(1일)",
     "총 판매수량(14일)", "직접 판매수량(14일)", "총 전환매출액(14일)", "직접 전환매출액(14일)",
 ]
+
+# 대시보드 "캠페인별 월간 상위 키워드" 표용: 월+캠페인+키워드로 합친 뒤
+# 캠페인·월마다 광고비 상위 KEYWORD_TOP_N개만 남긴다(키워드 전체를 넣으면
+# 로딩이 느려지므로).
+KEYWORD_TOP_N = 20
 
 NS = {"a": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
 REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -222,16 +228,87 @@ def _encode(n_cols):
     return dicts, encode
 
 
+def _month_of(v):
+    """날짜 값 -> "YYYY-MM". 20261001(숫자), "2026-10-01"/"2026.10.01"(글자),
+    엑셀 날짜 일련번호를 모두 처리한다. 모르면 None."""
+    import re
+    from datetime import date, timedelta
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        n = int(v)
+        if 19000101 <= n <= 29991231:
+            return f"{n // 10000:04d}-{n // 100 % 100:02d}"
+        if 1 <= n < 100000:  # 엑셀 날짜 일련번호
+            d = date(1899, 12, 30) + timedelta(days=n)
+            return f"{d.year:04d}-{d.month:02d}"
+        return None
+    m = re.match(r"\s*(\d{4})[-./]?(\d{1,2})", str(v))
+    return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}" if m else None
+
+
+def _keyword_text(v):
+    """키워드 값. 빈 칸과 "-"(MX 리포트의 키워드 없음 표기)는 ""로 맞춘다."""
+    t = str(_clean(v) if v is not None else "").strip()
+    return "" if t in ("-", "None") else t
+
+
+def build_keyword_cache(rows, index, meta):
+    """월+캠페인ID+캠페인명+키워드로 합친 뒤, 캠페인·월마다 광고비 상위
+    KEYWORD_TOP_N개만 남긴 키워드 캐시."""
+    metric_cols = [c for c in METRIC_COLS if c in index]
+    groups = {}
+    for r in rows[1:]:
+        if not r:
+            continue
+        month = _month_of(r.get(index["날짜"]))
+        if not month:
+            continue
+        key = (
+            month,
+            _clean(r.get(index.get("캠페인 ID"), "")),
+            _clean(r.get(index.get("캠페인명"), "")),
+            _keyword_text(r.get(index[KEYWORD_COL], "")),
+        )
+        acc = groups.get(key)
+        if acc is None:
+            acc = groups[key] = [0] * len(metric_cols)
+        for j, c in enumerate(metric_cols):
+            n = _num(r.get(index[c]))
+            if n is not None:
+                acc[j] += n
+    by_campaign = {}
+    for key, acc in groups.items():
+        by_campaign.setdefault(key[:3], []).append((key, acc))
+    cost_i = metric_cols.index("광고비") if "광고비" in metric_cols else 0
+    kept = []
+    for items in by_campaign.values():
+        items.sort(key=lambda kv: -kv[1][cost_i])
+        # 키워드가 빈 행(비검색 영역 등 검색어 없이 노출)은 순위와 별개로 항상
+        # 남기고, 실제 키워드는 상위 KEYWORD_TOP_N개를 남긴다.
+        kept.extend([kv for kv in items if not kv[0][3]])
+        kept.extend([kv for kv in items if kv[0][3]][:KEYWORD_TOP_N])
+    columns = ["월", "캠페인 ID", "캠페인명", KEYWORD_COL]
+    dicts, encode = _encode(len(columns))
+    out = [encode(key) + [_metric_value(x) for x in acc] for key, acc in kept]
+    return {
+        "v": 1, **meta, "topN": KEYWORD_TOP_N,
+        "groupColumns": columns, "metricColumns": metric_cols,
+        "dicts": dicts, "rows": out,
+    }
+
+
 def build_caches(path):
-    """(대시보드용 합친 캐시, 다운로드용 전체 행 캐시)를 돌려준다.
-    키워드 리포트가 아니면 (None, None)."""
+    """(대시보드용 합친 캐시, 다운로드용 전체 행 캐시, 키워드 상위 캐시)를
+    돌려준다. 키워드 리포트가 아니면 (None, None, None)."""
+    path = path.resolve()
     rows = read_xlsb_rows(path) if path.suffix.lower() == ".xlsb" else read_xlsx_rows(path)
     if not rows:
-        return None, None
+        return None, None, None
     header = {i: str(h).strip() for i, h in rows[0].items() if str(h).strip()}
     index = {name: i for i, name in header.items()}
     if KEYWORD_COL not in index:
-        return None, None  # 키워드 단위 리포트가 아니면 원본이 이미 가벼우므로 그대로 둔다
+        return None, None, None  # 키워드 단위 리포트가 아니면 원본이 이미 가벼우므로 그대로 둔다
     meta = {
         "source": path.relative_to(ROOT).as_posix(),
         "sourceSize": path.stat().st_size,
@@ -279,11 +356,14 @@ def build_caches(path):
         "groupColumns": text_cols, "metricColumns": full_metric_cols,
         "dicts": fdicts, "rows": full_rows,
     }
-    return dashboard, full
+    return dashboard, full, build_keyword_cache(rows, index, meta)
 
 
-def cache_path_for(src, full=False):
-    return CACHE_DIR / (src.name + (".full.json" if full else ".json"))
+CACHE_SUFFIX = {"dashboard": ".json", "full": ".full.json", "keywords": ".keywords.json"}
+
+
+def cache_path_for(src, kind="dashboard"):
+    return CACHE_DIR / (src.name + CACHE_SUFFIX[kind])
 
 
 def _write(dest, data):
@@ -296,11 +376,11 @@ def main():
     for src in sorted(SRC_DIR.glob("*")):
         if src.suffix.lower() not in (".xlsb", ".xlsx"):
             continue
-        dashboard, full = build_caches(src)
+        dashboard, full, keywords = build_caches(src)
         if dashboard is None:
             continue
-        for data, is_full in ((dashboard, False), (full, True)):
-            dest = cache_path_for(src, is_full)
+        for data, kind in ((dashboard, "dashboard"), (full, "full"), (keywords, "keywords")):
+            dest = cache_path_for(src, kind)
             wanted.add(dest.name)
             _write(dest, data)
             print(f"{dest.name}: {data['sourceRows']} rows -> {len(data['rows'])} rows ({dest.stat().st_size // 1024}KB)")

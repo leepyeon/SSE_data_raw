@@ -36,6 +36,9 @@
       // "광고명"이 그 역할이라 NCA는 광고명 값을 광고집행 상품명으로 쓴다
       // (리포트RAW의 CE_RAW/MX_RAW/쿠팡_전환상품_RAW "광고집행 상품명" 칸).
       execProductName: ["광고집행 상품명", "광고명"],
+      // 노출 지면(검색 영역/비검색 영역/외부 채널) - PA는 "광고 노출 지면",
+      // NCA는 "노출 영역". 광고 상품별 데이터 표의 노출 지면별 성과용.
+      placement: ["광고 노출 지면", "노출 영역"],
       keyword: "키워드",
       // NCA 세부품목 보정(의류케어 기획전 캠페인의 세탁기/건조기 구분)용.
       adName: "광고명",
@@ -141,7 +144,9 @@
   function table1ColsFor(platform) {
     return platform === "coupang" ? TABLE1_COLS_COUPANG : TABLE1_COLS_NAVER;
   }
-  const TABLE2_COLS = [{ key: "productType", label: "상품구분" }, ...METRIC_COLUMNS];
+  const TABLE2_COLS = [{ key: "productType", label: "상품구분" }, { key: "placement", label: "노출 지면" }, ...METRIC_COLUMNS];
+  const MONTH_COLS = [{ key: "monthLabel", label: "월" }, ...METRIC_COLUMNS];
+  const KEYWORD_COLS = [{ key: "rank", label: "순위" }, { key: "keyword", label: "키워드", maxLen: 30 }, ...METRIC_COLUMNS];
   const TABLE3_COLS = [
     { key: "weekLabel", label: "주차" },
     ...METRIC_COLUMNS,
@@ -177,6 +182,9 @@
     indexMaps: null, // INDEX/ 품목 분류 파일에서 만든 조회용 맵 (쿠팡 전용)
     gfaIndexMaps: null, // 리포트양식/ GFA 양식 파일의 품목 조회용 맵 (네이버 전용)
     activePlatform: "coupang",
+    // 캠페인별 월간 상위 20개 키워드(Actions가 만든 keywordCache). null이면 아직 로딩 중.
+    keywordRows: null,
+    keywordCampaign: null, // 키워드 표에서 고른 캠페인 ID
     table1Page: 1,
     // 슬라이서 선택 상태 - 플랫폼(탭)마다 따로 기억한다(탭을 바꿔도 유지됨).
     filters: {
@@ -435,15 +443,17 @@
   // 통과시킨다(=전체 보기). 구분/품목/상세 품목은 쿠팡 전용이라 네이버에서는
   // 값이 항상 null이고, 네이버 쪽 슬라이서도 항상 비어있어 걸리지 않는다.
   // skip에 기준 이름을 주면 그 기준만 빼고 검사한다(필터 버튼 목록 계산용).
+  // skip은 기준 이름 하나(문자열) 또는 여러 개(Set).
   function passesFilters(platform, date, productType, itemCategory, subItem, skip) {
     const f = state.filters[platform];
-    if (skip !== "years" && f.years.size && !f.years.has(yearOf(date))) return false;
-    if (skip !== "months" && f.months.size && !f.months.has(monthOf(date))) return false;
-    if (skip !== "weeks" && f.weeks.size && !f.weeks.has(weekKeyOf(date))) return false;
-    if (skip !== "divisions" && f.divisions.size && !f.divisions.has(classifyDivision(itemCategory))) return false;
-    if (skip !== "productTypes" && f.productTypes.size && !f.productTypes.has(productType)) return false;
-    if (skip !== "itemCategories" && f.itemCategories.size && !f.itemCategories.has(itemCategory)) return false;
-    if (skip !== "subItems" && f.subItems.size && !f.subItems.has(subItem)) return false;
+    const on = (dim) => !(skip === dim || (skip instanceof Set && skip.has(dim))) && f[dim].size;
+    if (on("years") && !f.years.has(yearOf(date))) return false;
+    if (on("months") && !f.months.has(monthOf(date))) return false;
+    if (on("weeks") && !f.weeks.has(weekKeyOf(date))) return false;
+    if (on("divisions") && !f.divisions.has(classifyDivision(itemCategory))) return false;
+    if (on("productTypes") && !f.productTypes.has(productType)) return false;
+    if (on("itemCategories") && !f.itemCategories.has(itemCategory)) return false;
+    if (on("subItems") && !f.subItems.has(subItem)) return false;
     return true;
   }
 
@@ -907,6 +917,8 @@
       state.rows = allRows;
       renderAll();
       if (banner) banner.hidden = true;
+      // 키워드 표는 작은 별도 파일이라 첫 화면을 띄운 뒤에 불러온다.
+      loadKeywordCaches().then(renderKeywordTable);
     } catch (e) {
       // 여기서 예외가 나면 배너가 계속 "불러오는 중"으로 남아 무한로딩처럼
       // 보이므로, 실패했다는 걸 화면에 분명히 보여준다.
@@ -931,6 +943,7 @@
       group: resolveFieldForCols(cols, platform, "group"),
       viid: resolveFieldForCols(cols, platform, "viid"),
       execProductName: resolveFieldForCols(cols, platform, "execProductName"),
+      placement: resolveFieldForCols(cols, platform, "placement"),
     };
     const metricCols = {};
     for (const f of DASHBOARD_METRIC_FIELDS) metricCols[f] = resolveFieldForCols(cols, platform, f);
@@ -1164,8 +1177,12 @@
   }
 
   // 표2. 상품구분 기준 전체기간 합산
+  // 광고 상품별 데이터: 상품구분별 소계(노출 지면 "전체") 아래에 노출 지면별
+  // (검색 영역/비검색 영역/외부 채널) 행을 붙인다. 노출 지면 정보가 없는
+  // 상품(네이버 등)은 소계 한 줄만.
   function computeTable2(platform) {
-    const groups = new Map();
+    const totals = new Map();
+    const byPlacement = new Map();
     for (const row of state.rows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
@@ -1173,9 +1190,20 @@
       const productType = row.__productType;
       const itemCategory = row.__item;
       if (!date || !passesFilters(platform, date, productType, itemCategory, row.__subItem)) continue;
-      accumulateRow(groups, productType, { productType }, row, fp, platform);
+      accumulateRow(totals, productType, { productType, placement: "전체", isSubtotal: true }, row, fp, platform);
+      const placementCol = resolveField(fp, platform, "placement");
+      if (placementCol) {
+        const placement = String(row[placementCol] ?? "").trim() || "-";
+        accumulateRow(byPlacement, `${productType}\u0001${placement}`, { productType, placement }, row, fp, platform);
+      }
     }
-    return finalizeGroups(groups).sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+    const placementRows = finalizeGroups(byPlacement);
+    const out = [];
+    for (const t of finalizeGroups(totals).sort((a, b) => (b.revenue || 0) - (a.revenue || 0))) {
+      out.push(t);
+      out.push(...placementRows.filter((r) => r.productType === t.productType).sort((a, b) => (b.cost || 0) - (a.cost || 0)));
+    }
+    return out;
   }
 
   // 표3. 주차 기준 합산(상품구분 구분 없이 전체 합산)
@@ -1246,7 +1274,9 @@
     renderTable1();
     renderTable2();
     renderTable3();
+    renderMonthly();
     renderTable4();
+    renderKeywordTable();
   }
 
   function renderTabs() {
@@ -1340,7 +1370,7 @@
       .join("");
   }
 
-  const TEXT_COLUMN_KEYS = new Set(["rank", "productType", "productName", "viid", "campaign", "group", "weekLabel", "itemCategory"]);
+  const TEXT_COLUMN_KEYS = new Set(["rank", "productType", "productName", "viid", "campaign", "group", "weekLabel", "itemCategory", "placement", "monthLabel", "keyword"]);
 
   function cellText(row, col) {
     if (TEXT_COLUMN_KEYS.has(col.key)) {
@@ -1411,6 +1441,7 @@
         if (options.decorate) options.decorate(td, row, col);
         tr2.appendChild(td);
       }
+      if (options.rowClass) tr2.className = options.rowClass(row) || "";
       bodyEl.appendChild(tr2);
     }
   }
@@ -1429,7 +1460,10 @@
 
   function renderTable2() {
     const rows = computeTable2(state.activePlatform);
-    renderMetricTable(el("table2Head"), el("table2Body"), TABLE2_COLS, rows, "데이터가 없습니다.");
+    renderMetricTable(el("table2Head"), el("table2Body"), TABLE2_COLS, rows, "데이터가 없습니다.", {
+      totalRows: rows.filter((r) => r.isSubtotal), // 합계는 소계 행들만 더한다(중복 방지)
+      rowClass: (r) => (r.isSubtotal ? "subtotal-row" : "sub-row"),
+    });
   }
 
   // 표3 맨 아래에 최근 주차 2개의 증감율(%)을 한 줄 추가한다. 공식 예:
@@ -1437,12 +1471,16 @@
   // 증가는 빨간색(▲), 하락은 파란색(▼).
   function appendWeekCompareRow(bodyEl, rows) {
     if (rows.length < 2) return;
-    const prev = rows[rows.length - 2];
-    const latest = rows[rows.length - 1];
+    appendCompareRow(bodyEl, rows[rows.length - 2], rows[rows.length - 1], "최근 2개 주차 증감율");
+  }
+
+  // prev -> latest 증감율 한 줄. prev가 없으면(전월 데이터 없음) 모두 "-".
+  function appendCompareRow(bodyEl, prev, latest, label) {
+    prev = prev || {};
     const tr = document.createElement("tr");
     tr.className = "week-compare-row";
     const labelTd = document.createElement("td");
-    labelTd.textContent = "최근 2개 주차 증감율";
+    labelTd.textContent = label;
     tr.appendChild(labelTd);
     for (const col of METRIC_COLUMNS) {
       const td = document.createElement("td");
@@ -1466,6 +1504,145 @@
       tr.appendChild(td);
     }
     bodyEl.appendChild(tr);
+  }
+
+  // 월별 데이터: 월 단위 합계 + 전월 대비 증감율. 월을 비교해야 하므로
+  // 년도/월/주차 필터는 이 표에만 적용하지 않고(구분/광고상품유형/품목/상세
+  // 품목은 적용), 대신 년도/월을 고르면 그 달을 "이번 달"로 본다.
+  // 전월 데이터가 아직 없으면 전월 행을 "데이터 없음"으로 보여주고 증감율은 "-".
+  function monthKeyOf(date) {
+    return date.slice(0, 7);
+  }
+
+  function prevMonthKey(key) {
+    const [y, m] = key.split("-").map(Number);
+    return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+  }
+
+  function monthLabelOf(key) {
+    const [y, m] = key.split("-").map(Number);
+    return `${y}년 ${m}월`;
+  }
+
+  function computeMonthly(platform) {
+    const f = state.filters[platform];
+    const groups = new Map();
+    const timeDims = new Set(["years", "months", "weeks"]);
+    for (const row of state.rows) {
+      if (row.__platform !== platform) continue;
+      const date = row.__date;
+      if (!date || !passesFilters(platform, date, row.__productType, row.__item, row.__subItem, timeDims)) continue;
+      const key = monthKeyOf(date);
+      accumulateRow(groups, key, { monthKey: key, monthLabel: monthLabelOf(key) }, row, row.__filePath, platform);
+    }
+    const all = finalizeGroups(groups).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+    const inPeriod = (k) => (!f.years.size || f.years.has(k.slice(0, 4))) && (!f.months.size || f.months.has(k.slice(5, 7)));
+    const shown = all.filter((r) => inPeriod(r.monthKey));
+    if (!shown.length) return { rows: [], latest: null, prev: null, prevKey: null };
+    const latest = shown[shown.length - 1];
+    const prevKey = prevMonthKey(latest.monthKey);
+    let prev = all.find((r) => r.monthKey === prevKey) || null;
+    const rows = [...shown];
+    if (!rows.some((r) => r.monthKey === prevKey)) {
+      if (prev) rows.unshift(prev);
+      else rows.unshift({ monthKey: prevKey, monthLabel: `${monthLabelOf(prevKey)} (데이터 없음)`, placeholder: true });
+    }
+    rows.sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+    return { rows, latest, prev, prevKey };
+  }
+
+  function renderMonthly() {
+    const { rows, latest, prev, prevKey } = computeMonthly(state.activePlatform);
+    renderMetricTable(el("monthHead"), el("monthBody"), MONTH_COLS, rows, "데이터가 없습니다.", {
+      totalRows: rows.filter((r) => !r.placeholder),
+      rowClass: (r) => (r.placeholder ? "placeholder-row" : ""),
+    });
+    if (latest) {
+      const label = prev
+        ? `전월 대비 증감율 (${Number(prevKey.slice(5))}월 → ${Number(latest.monthKey.slice(5))}월)`
+        : `전월 대비 증감율 (${Number(prevKey.slice(5))}월 데이터 없음)`;
+      appendCompareRow(el("monthBody"), prev, latest, label);
+    }
+  }
+
+  // ---------- 캠페인별 월간 상위 20개 키워드 ----------
+  async function loadKeywordCaches() {
+    const files = state.manifest.files.filter((f) => f.platform === "coupang" && f.keywordCache);
+    const out = [];
+    await Promise.all(files.map(async (f) => {
+      try {
+        const res = await fetch(f.keywordCache);
+        if (!res.ok) return;
+        const cache = await res.json();
+        if (cache.sourceSize !== f.size) return; // 원본이 바뀌었는데 아직 캐시가 안 갱신됨
+        const fp = f.keywordCache;
+        const { groupColumns, metricColumns, dicts } = cache;
+        state.colsByFile.set(fp, new Set([...groupColumns, ...metricColumns]));
+        if (indexMapsReadyPromise) await indexMapsReadyPromise;
+        const productType = detectProductType("coupang", f.name);
+        const g = groupColumns.length;
+        for (const r of cache.rows) {
+          const row = { __platform: "coupang", __filePath: fp, __file: f.name, __productType: productType };
+          for (let j = 0; j < g; j++) row[groupColumns[j]] = dicts[j][r[j]];
+          for (let j = 0; j < metricColumns.length; j++) row[metricColumns[j]] = r[g + j];
+          row.__date = `${row["월"]}-01`;
+          const cls = resolveItemClassification(row, fp, "coupang", productType);
+          row.__item = cls.item;
+          row.__subItem = cls.subItem;
+          out.push(row);
+        }
+      } catch (e) {
+        console.error("키워드 캐시를 불러오지 못했습니다:", f.keywordCache, e);
+      }
+    }));
+    state.keywordRows = out;
+  }
+
+  // 월 단위 데이터라 주차 필터는 적용하지 않는다(나머지 필터는 적용).
+  function renderKeywordTable() {
+    const select = el("keywordCampaignSelect");
+    const head = el("keywordHead");
+    const body = el("keywordBody");
+    if (state.activePlatform !== "coupang") return;
+    if (!state.keywordRows) {
+      select.innerHTML = "";
+      head.innerHTML = "";
+      body.innerHTML = `<tr><td class="empty-state">키워드 데이터를 불러오는 중입니다...</td></tr>`;
+      return;
+    }
+    const platform = "coupang";
+    const rows = state.keywordRows.filter((r) => passesFilters(platform, r.__date, r.__productType, r.__item, r.__subItem, "weeks"));
+    const campaigns = new Map();
+    for (const r of rows) {
+      const id = String(r["캠페인 ID"]);
+      const c = campaigns.get(id) || { id, name: r["캠페인명"], cost: 0 };
+      c.cost += Number(r["광고비"]) || 0;
+      campaigns.set(id, c);
+    }
+    const list = [...campaigns.values()].sort((a, b) => b.cost - a.cost);
+    if (!list.some((c) => c.id === state.keywordCampaign)) state.keywordCampaign = list[0]?.id ?? null;
+    select.innerHTML = list
+      .map((c) => `<option value="${escapeHtml(c.id)}"${c.id === state.keywordCampaign ? " selected" : ""}>${escapeHtml(c.name)} (광고비 ${escapeHtml(koreanMoney(c.cost))})</option>`)
+      .join("");
+    const groups = new Map();
+    const NO_KEYWORD = "키워드 없음 (비검색·외부 지면 등)";
+    for (const r of rows) {
+      if (String(r["캠페인 ID"]) !== state.keywordCampaign) continue;
+      const raw = String(r["키워드"] ?? "").trim();
+      const kw = raw && raw !== "-" ? raw : NO_KEYWORD;
+      accumulateRow(groups, kw, { keyword: kw, noKeyword: kw === NO_KEYWORD }, r, r.__filePath, platform);
+    }
+    const all = finalizeGroups(groups);
+    // 실제 키워드만 광고비 순으로 1~20위, "키워드 없음"은 순위 없이 맨 아래.
+    const top = all
+      .filter((r) => !r.noKeyword)
+      .sort((a, b) => (b.cost || 0) - (a.cost || 0))
+      .slice(0, 20)
+      .map((r, i) => ({ ...r, rank: i + 1 }));
+    const noKw = all.filter((r) => r.noKeyword).map((r) => ({ ...r, rank: "-" }));
+    renderMetricTable(head, body, KEYWORD_COLS, [...top, ...noKw], "키워드 데이터가 없습니다.", {
+      rowClass: (r) => (r.noKeyword ? "placeholder-row" : ""),
+    });
   }
 
   function renderTable3() {
@@ -1778,6 +1955,11 @@
       renderAll();
     });
   }
+
+  el("keywordCampaignSelect").addEventListener("change", (e) => {
+    state.keywordCampaign = e.target.value;
+    renderKeywordTable();
+  });
 
   el("filterResetBtn").addEventListener("click", () => {
     const f = state.filters[state.activePlatform];
