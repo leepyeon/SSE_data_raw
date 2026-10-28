@@ -86,7 +86,10 @@
     coupang: {
       PA: "광고전환매출발생 상품명",
       BPA: "__campaign",
-      NCA: "__campaign",
+      // NCA는 캠페인명이 "[NCA] 10월 브랜드위크_모바일(상품소재)"처럼 여러
+      // 상품을 묶는 기획전 이름이라 상품을 구분 못 한다. "광고명"은 실제
+      // 광고 소재 단위라 거기 들어간 상품명으로 구분한다.
+      NCA: "광고명",
     },
     naver: {
       "쇼핑검색광고(카탈로그)": "__campaign",
@@ -124,7 +127,6 @@
   const TABLE1_COLS_NAVER = [
     { key: "productType", label: "상품구분" },
     { key: "campaign", label: "캠페인명" },
-    { key: "group", label: "그룹명" },
     ...METRIC_COLUMNS,
   ];
   function table1ColsFor(platform) {
@@ -133,7 +135,6 @@
   const TABLE2_COLS = [{ key: "productType", label: "상품구분" }, ...METRIC_COLUMNS];
   const TABLE3_COLS = [
     { key: "weekLabel", label: "주차" },
-    { key: "productType", label: "상품구분" },
     ...METRIC_COLUMNS,
   ];
   const TABLE4_COLS = [
@@ -188,7 +189,7 @@
   // csv/xlsx 파일 하나를 읽어서 {header: value} 형태의 행 배열로 반환한다.
   async function parseDataFile(path) {
     const buf = await fetchArrayBuffer(path);
-    if (/\.xlsx?$/i.test(path)) {
+    if (/\.(xlsx?|xlsb)$/i.test(path)) {
       // 엑셀은 날짜 셀이 내부적으로 숫자(일련번호, 예: 46266)로 저장된다.
       // cellDates로 최대한 JS Date로 바꾸되, 셀 서식이 인식 안 되는 경우를 대비해
       // raw:true로 원본 값(숫자 or Date)을 그대로 받아 parseDateLoose에서 이중으로 처리한다.
@@ -731,7 +732,8 @@
 
   // 표1. 전체기간 합산 (날짜 무시). 쿠팡은 INDEX 분류로 찾은 품목 기준으로만
   // 묶는다(상품구분이 달라도 같은 품목이면 하나로 합산). 네이버는 품목 분류
-  // 데이터가 없어서 기존처럼 상품구분+캠페인명+그룹명 기준.
+  // 데이터가 없어서 상품구분+캠페인명 기준(쿠팡 표1처럼 그룹 구분 없이
+  // 한 가지 기준으로만 묶는다).
   function computeTable1(platform) {
     const groups = new Map();
     for (const row of state.rows) {
@@ -746,11 +748,9 @@
         accumulateRow(groups, itemCategory, { itemCategory }, row, fp, platform);
       } else {
         const campaignCol = resolveField(fp, platform, "campaign");
-        const groupCol = resolveField(fp, platform, "group");
         const campaign = campaignCol ? row[campaignCol] ?? "" : "";
-        const group = groupCol ? row[groupCol] ?? "" : "";
-        const key = `${productType}\u0001${campaign}\u0001${group}`;
-        accumulateRow(groups, key, { productType, campaign, group }, row, fp, platform);
+        const key = `${productType}\u0001${campaign}`;
+        accumulateRow(groups, key, { productType, campaign }, row, fp, platform);
       }
     }
     const result = finalizeGroups(groups);
@@ -758,7 +758,7 @@
       return result.sort((a, b) => a.itemCategory.localeCompare(b.itemCategory, "ko"));
     }
     return result.sort(
-      (a, b) => a.productType.localeCompare(b.productType) || a.campaign.localeCompare(b.campaign, "ko") || a.group.localeCompare(b.group, "ko")
+      (a, b) => a.productType.localeCompare(b.productType) || a.campaign.localeCompare(b.campaign, "ko")
     );
   }
 
@@ -778,7 +778,7 @@
     return finalizeGroups(groups).sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
   }
 
-  // 표3. 주차+상품구분 기준 합산
+  // 표3. 주차 기준 합산(상품구분 구분 없이 전체 합산)
   function computeTable3(platform) {
     const groups = new Map();
     for (const row of state.rows) {
@@ -790,10 +790,9 @@
       const itemCategory = rowItemCategory(row, fp, platform, productType);
       if (!date || !passesFilters(platform, date, productType, itemCategory)) continue;
       const week = weekOf(date);
-      const key = `${week.key}\u0001${productType}`;
-      accumulateRow(groups, key, { weekKey: week.key, weekLabel: week.label, productType }, row, fp, platform);
+      accumulateRow(groups, week.key, { weekKey: week.key, weekLabel: week.label }, row, fp, platform);
     }
-    return finalizeGroups(groups).sort((a, b) => a.weekKey.localeCompare(b.weekKey) || a.productType.localeCompare(b.productType));
+    return finalizeGroups(groups).sort((a, b) => a.weekKey.localeCompare(b.weekKey));
   }
 
   // 표4. 상품구분+상품명 기준 합산 후 전환매출 상위 10개
@@ -955,9 +954,36 @@
     renderMetricTable(el("table2Head"), el("table2Body"), TABLE2_COLS, rows, "데이터가 없습니다.");
   }
 
+  // 표3 맨 아래에 최근 주차 2개의 증감율(%)을 한 줄 추가한다. 공식 예:
+  // 2주차/1주차-1 (최신 주 값 / 그 전 주 값 - 1). 주차가 2개 미만이면 생략.
+  function appendWeekCompareRow(bodyEl, rows) {
+    if (rows.length < 2) return;
+    const prev = rows[rows.length - 2];
+    const latest = rows[rows.length - 1];
+    const tr = document.createElement("tr");
+    tr.style.fontWeight = "700";
+    const labelTd = document.createElement("td");
+    labelTd.textContent = `${prev.weekLabel} → ${latest.weekLabel} 증감율`;
+    tr.appendChild(labelTd);
+    for (const col of METRIC_COLUMNS) {
+      const td = document.createElement("td");
+      const a = prev[col.key];
+      const b = latest[col.key];
+      if (!Number.isFinite(a) || a === 0 || !Number.isFinite(b)) {
+        td.textContent = "-";
+      } else {
+        const pct = (b / a - 1) * 100;
+        td.textContent = `${pct.toLocaleString("ko-KR", { maximumFractionDigits: 2, signDisplay: "exceptZero" })}%`;
+      }
+      tr.appendChild(td);
+    }
+    bodyEl.appendChild(tr);
+  }
+
   function renderTable3() {
     const rows = computeTable3(state.activePlatform);
     renderMetricTable(el("table3Head"), el("table3Body"), TABLE3_COLS, rows, "데이터가 없습니다.");
+    appendWeekCompareRow(el("table3Body"), rows);
   }
 
   function renderTable4() {
