@@ -205,29 +205,45 @@
     return parsed.data.map(trimKeys);
   }
 
-  function countCsvFields(line) {
-    let count = 1;
+  function splitCsvFields(line) {
+    const fields = [];
+    let cur = "";
     let inQuotes = false;
     for (let i = 0; i < line.length; i++) {
       const ch = line[i];
       if (ch === '"') inQuotes = !inQuotes;
-      else if (ch === "," && !inQuotes) count++;
+      else if (ch === "," && !inQuotes) {
+        fields.push(cur);
+        cur = "";
+      } else {
+        cur += ch;
+      }
     }
-    return count;
+    fields.push(cur);
+    return fields;
+  }
+
+  // 실제 값이 들어있는 필드 수만 센다(따옴표 안 콤마는 필드를 안 나눔).
+  // "제목,ID" 뒤에 열 맞추기용 빈 콤마가 더 붙는 리포트(예: 검색어_RAW)가
+  // 있어서, 그냥 필드 개수가 아니라 "비어있지 않은" 필드 개수로 비교해야
+  // 제목 줄과 진짜 헤더 줄을 구분할 수 있다.
+  function countNonEmptyCsvFields(line) {
+    return splitCsvFields(line).filter((f) => f.trim() !== "").length;
   }
 
   // 네이버 리포트 중 일부(예: 쇼핑검색광고(카탈로그) 다운로드)는 실제 헤더 위에
   // "리포트 제목,ID" 같은 한 줄짜리 메타데이터 행이 붙어 있어서, 그걸 헤더로
   // 잘못 읽으면 노출수/클릭수/총비용은 물론 캠페인/그룹/날짜까지 다 깨진다.
-  // 첫 줄의 필드 수가 둘째 줄보다 훨씬 적으면 첫 줄을 제목으로 보고 건너뛴다.
+  // 첫 줄의 (비어있지 않은) 필드 수가 둘째 줄보다 훨씬 적으면 첫 줄을
+  // 제목으로 보고 건너뛴다.
   function stripLeadingTitleLine(text) {
     const nl = text.indexOf("\n");
     if (nl === -1) return text;
     const firstLine = text.slice(0, nl).replace(/\r$/, "");
     const nl2 = text.indexOf("\n", nl + 1);
     const secondLine = (nl2 === -1 ? text.slice(nl + 1) : text.slice(nl + 1, nl2)).replace(/\r$/, "");
-    const firstCount = countCsvFields(firstLine);
-    const secondCount = countCsvFields(secondLine);
+    const firstCount = countNonEmptyCsvFields(firstLine);
+    const secondCount = countNonEmptyCsvFields(secondLine);
     if (firstCount <= 2 && secondCount >= firstCount + 3) {
       return text.slice(nl + 1);
     }
@@ -375,16 +391,14 @@
     const itemCategories = new Set();
     for (const row of state.rows) {
       if (row.__platform !== platform) continue;
-      const fp = row.__filePath;
-      const dateCol = resolveField(fp, platform, "date");
-      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      const date = row.__date;
       if (date) {
         years.add(yearOf(date));
         months.add(monthOf(date));
       }
       productTypes.add(row.__productType);
       if (platform === "coupang") {
-        itemCategories.add(resolveItemCategory(row, fp, platform, row.__productType));
+        itemCategories.add(row.__item);
       }
     }
     return {
@@ -414,8 +428,21 @@
 
   // ---------- 컬럼 매핑 ----------
 
+  // resolveField 결과는 filePath+field 조합에만 좌우되고(행 내용과 무관),
+  // raw가 수십만 행이면 행마다 다시 계산하는 게 비싸서 캐시해둔다.
+  // computeColsByFile()에서 state.colsByFile을 다시 만들 때 함께 비운다.
+  let fieldResolutionCache = new Map();
+
   // platform의 field(날짜/캠페인/그룹/광고비 등)가 filePath 안에서 어떤 실제 컬럼명인지 찾는다.
   function resolveField(filePath, platform, field) {
+    const cacheKey = `${filePath}\u0001${field}`;
+    if (fieldResolutionCache.has(cacheKey)) return fieldResolutionCache.get(cacheKey);
+    const result = resolveFieldUncached(filePath, platform, field);
+    fieldResolutionCache.set(cacheKey, result);
+    return result;
+  }
+
+  function resolveFieldUncached(filePath, platform, field) {
     const cols = state.colsByFile.get(filePath);
     if (!cols) return null;
     const mapped = FIELD_MAP[platform]?.[field];
@@ -616,7 +643,6 @@
     if (platform !== "coupang") return null;
     const maps = state.indexMaps;
     const unclassified = { item: "미분류", subItem: "미분류" };
-    if (!maps) return unclassified;
     const cidCol = resolveField(fp, platform, "campaignId");
     const campaignCol = resolveField(fp, platform, "campaign");
     const groupCol = resolveField(fp, platform, "group");
@@ -627,6 +653,12 @@
       groupName: groupCol ? String(row[groupCol] ?? "").trim() : "",
       viid: viidCol ? normalizeId(row[viidCol]) : "",
     };
+    // 캠페인명에 "탭"/"태블릿"이 있으면 INDEX 조회와 상관없이 항상 태블릿으로
+    // 분류한다(새 캠페인이 계속 생겨도 INDEX 파일을 매번 안 고쳐도 되게).
+    if (/탭|태블릿/.test(values.campaignName)) {
+      return { item: "태블릿", subItem: "태블릿" };
+    }
+    if (!maps) return unclassified;
     const mapFor = {
       campaignId: maps.byCampaignId,
       campaignName: maps.byCampaignName,
@@ -647,12 +679,6 @@
       }
     }
     return unclassified;
-  }
-
-  // 표1/슬라이서 등 기존 코드는 품목 문자열만 필요하므로 얇은 래퍼로 제공.
-  function resolveItemCategory(row, fp, platform, productType) {
-    const classification = resolveItemClassification(row, fp, platform, productType);
-    return classification ? classification.item : null;
   }
 
   // 품목 -> 사업부(CE/MX). 웨어러블/모바일은 MX, 그 외 알려진 품목은 CE,
@@ -680,37 +706,80 @@
   }
 
   async function reloadData() {
-    const allRows = [];
-    for (const f of state.manifest.files) {
-      try {
-        const rows = await parseDataFile(f.path);
-        const productType = detectProductType(f.platform, f.name);
-        for (const row of rows) {
-          allRows.push({ __platform: f.platform, __file: f.name, __filePath: f.path, __productType: productType, ...row });
+    // 파일을 하나씩 순서대로 fetch+parse하면 느려서(raw가 많으면 파일도
+    // 여러 개, 각각 수만~수십만 행), 서로 독립적인 파일들을 병렬로 불러온다.
+    const perFileRows = await Promise.all(
+      state.manifest.files.map(async (f) => {
+        try {
+          const rows = await parseDataFile(f.path);
+          const productType = detectProductType(f.platform, f.name);
+          return rows.map((row) => ({
+            __platform: f.platform,
+            __file: f.name,
+            __filePath: f.path,
+            __productType: productType,
+            ...row,
+          }));
+        } catch (e) {
+          console.error("파일을 불러오지 못했습니다:", f.path, e);
+          return [];
         }
-      } catch (e) {
-        console.error("파일을 불러오지 못했습니다:", f.path, e);
-      }
-    }
+      })
+    );
+    const allRows = perFileRows.flat();
     state.rows = allRows;
     computeColsByFile();
+    precomputeRowMeta();
     renderAll();
   }
 
+  // 파일 하나의 raw 컬럼 구성은 보통 모든 행이 같아서(xlsx는 defval로,
+  // csv는 헤더 기준으로 항상 같은 키를 받음), 수십만 행을 전부 돌지 않고
+  // 파일당 첫 행만 보고 컬럼 집합을 만든다.
   function computeColsByFile() {
     const map = new Map();
     for (const row of state.rows) {
-      if (!map.has(row.__filePath)) map.set(row.__filePath, new Set());
-      const set = map.get(row.__filePath);
+      if (map.has(row.__filePath)) continue;
+      const set = new Set();
       for (const k of Object.keys(row)) {
         if (k.startsWith("__")) continue;
         set.add(k);
       }
+      map.set(row.__filePath, set);
     }
     state.colsByFile = map;
+    fieldResolutionCache = new Map();
+  }
+
+  // 날짜/품목 분류는 행 내용(과 파일의 컬럼 매핑)에만 좌우되고 필터나 탭을
+  // 바꿔도 바뀌지 않는데, 표1~4가 각자 모든 행을 다시 훑으며 매번
+  // 다시 계산하면(행이 수십만 개면 렌더링마다 수십만×4번) 느려지므로,
+  // 로드 시점에 한 번만 계산해서 각 행에 캐싱해둔다.
+  function precomputeRowMeta() {
+    for (const row of state.rows) {
+      const fp = row.__filePath;
+      const platform = row.__platform;
+      const dateCol = resolveField(fp, platform, "date");
+      row.__date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      if (platform === "coupang") {
+        const cls = resolveItemClassification(row, fp, platform, row.__productType);
+        row.__item = cls.item;
+        row.__subItem = cls.subItem;
+      } else {
+        row.__item = null;
+        row.__subItem = null;
+      }
+    }
   }
 
   // ---------- 집계 ----------
+
+  // 네이버 raw의 "총비용"은 매체에서 추출할 때부터 VAT 포함 금액으로 내려와서,
+  // VAT 제외 금액으로 보여주려면 1.1로 나눠야 한다(쿠팡 광고비는 원래 VAT
+  // 제외라 그대로 둔다).
+  function naverVatExcludedCost(cost) {
+    return Number.isFinite(cost) ? cost / 1.1 : cost;
+  }
 
   function accumulateRow(groups, key, base, row, fp, platform) {
     if (!groups.has(key)) {
@@ -723,7 +792,8 @@
     const convCol = resolveField(fp, platform, "conversions");
     const revCol = resolveField(fp, platform, "revenue");
 
-    const cost = costCol ? parseNumberLoose(row[costCol]) : NaN;
+    const costRaw = costCol ? parseNumberLoose(row[costCol]) : NaN;
+    const cost = platform === "naver" ? naverVatExcludedCost(costRaw) : costRaw;
     const impr = imprCol ? parseNumberLoose(row[imprCol]) : NaN;
     const clicks = clickCol ? parseNumberLoose(row[clickCol]) : NaN;
     const conv = convCol ? parseNumberLoose(row[convCol]) : NaN;
@@ -747,11 +817,6 @@
     }));
   }
 
-  // 품목 슬라이서 필터링用. 쿠팡이 아니면 품목 분류 자체가 없으므로 null.
-  function rowItemCategory(row, fp, platform, productType) {
-    return platform === "coupang" ? resolveItemCategory(row, fp, platform, productType) : null;
-  }
-
   // 표1. 전체기간 합산 (날짜 무시). 쿠팡은 INDEX 분류로 찾은 품목 기준으로만
   // 묶는다(상품구분이 달라도 같은 품목이면 하나로 합산). 네이버는 품목 분류
   // 데이터가 없어서 상품구분+캠페인명 기준(쿠팡 표1처럼 그룹 구분 없이
@@ -761,10 +826,9 @@
     for (const row of state.rows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
-      const dateCol = resolveField(fp, platform, "date");
-      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      const date = row.__date;
       const productType = row.__productType;
-      const itemCategory = rowItemCategory(row, fp, platform, productType);
+      const itemCategory = row.__item;
       if (!date || !passesFilters(platform, date, productType, itemCategory)) continue;
       if (platform === "coupang") {
         accumulateRow(groups, itemCategory, { itemCategory }, row, fp, platform);
@@ -790,10 +854,9 @@
     for (const row of state.rows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
-      const dateCol = resolveField(fp, platform, "date");
-      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      const date = row.__date;
       const productType = row.__productType;
-      const itemCategory = rowItemCategory(row, fp, platform, productType);
+      const itemCategory = row.__item;
       if (!date || !passesFilters(platform, date, productType, itemCategory)) continue;
       accumulateRow(groups, productType, { productType }, row, fp, platform);
     }
@@ -806,10 +869,9 @@
     for (const row of state.rows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
-      const dateCol = resolveField(fp, platform, "date");
-      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      const date = row.__date;
       const productType = row.__productType;
-      const itemCategory = rowItemCategory(row, fp, platform, productType);
+      const itemCategory = row.__item;
       if (!date || !passesFilters(platform, date, productType, itemCategory)) continue;
       const week = weekOf(date);
       accumulateRow(groups, week.key, { weekKey: week.key, weekLabel: week.label }, row, fp, platform);
@@ -823,10 +885,9 @@
     for (const row of state.rows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
-      const dateCol = resolveField(fp, platform, "date");
-      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      const date = row.__date;
       const productType = row.__productType;
-      const itemCategory = rowItemCategory(row, fp, platform, productType);
+      const itemCategory = row.__item;
       if (!date || !passesFilters(platform, date, productType, itemCategory)) continue;
       const campaignCol = resolveField(fp, platform, "campaign");
       const groupCol = resolveField(fp, platform, "group");
@@ -1064,10 +1125,10 @@
 
   function buildWeeklyRawRow(row, fp, productType) {
     const platform = "coupang";
-    const dateCol = resolveField(fp, platform, "date");
-    const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+    const date = row.__date;
     if (!date) return null;
-    const { item, subItem } = resolveItemClassification(row, fp, platform, productType);
+    const item = row.__item;
+    const subItem = row.__subItem;
     const division = classifyDivision(item);
     if (!division || !passesFilters(platform, date, productType, item)) return null;
     return {
@@ -1164,10 +1225,10 @@
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
       const productType = row.__productType;
-      const dateCol = resolveField(fp, platform, "date");
-      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      const date = row.__date;
       if (!date) continue;
-      const { item, subItem } = resolveItemClassification(row, fp, platform, productType);
+      const item = row.__item;
+      const subItem = row.__subItem;
       const division = classifyDivision(item);
       if (!division || !passesFilters(platform, date, productType, item)) continue;
       const campaignRaw = weeklyRawText(row, fp, platform, "campaign");
@@ -1209,10 +1270,10 @@
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
       const productType = row.__productType;
-      const dateCol = resolveField(fp, platform, "date");
-      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      const date = row.__date;
       if (!date) continue;
-      const { item, subItem } = resolveItemClassification(row, fp, platform, productType);
+      const item = row.__item;
+      const subItem = row.__subItem;
       const division = classifyDivision(item);
       if (!division || !passesFilters(platform, date, productType, item)) continue;
       const campaignIdRaw = weeklyRawText(row, fp, platform, "campaignId");
@@ -1262,10 +1323,10 @@
       if (row.__platform !== platform || row.__productType !== "PA") continue;
       const fp = row.__filePath;
       const productType = row.__productType;
-      const dateCol = resolveField(fp, platform, "date");
-      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      const date = row.__date;
       if (!date) continue;
-      const { item, subItem } = resolveItemClassification(row, fp, platform, productType);
+      const item = row.__item;
+      const subItem = row.__subItem;
       const division = classifyDivision(item);
       if (!division || !passesFilters(platform, date, productType, item)) continue;
       const campaignIdRaw = weeklyRawText(row, fp, platform, "campaignId");
@@ -1322,8 +1383,8 @@
   // 그 양식 안의 캠페인ID/상품코드 -> 품목구분 조회표(월 단위로 재사용되는
   // 경우가 있어 월+ID로 조회, loadGfaIndexMaps/buildGfaIndexMaps 참고)로
   // 채운다. 쇼핑검색광고(카탈로그)는 캠페인ID/상품ID 자체가 없어서 두 시트
-  // 모두에서 빠진다. "광고비(-VAT)"는 VAT 제외 방식을 확인할 수 없어서
-  // "-"로 비워둔다.
+  // 모두에서 빠진다. "광고비(-VAT)"는 "총비용(VAT포함,원)"을 1.1로 나눈
+  // 값이다(네이버 raw 추출 시 총비용에 VAT가 포함되어 내려온다).
   const GFA_CAMPAIGN_HEADER = [
     "집행 년", "집행 월", "캠페인 ID", "품목명", "광고유형", "캠페인명",
     "총비용(VAT포함,원)", "노출수", "클릭수", "구매완료(1일)", "구매완료 전환매출액(1일)", "광고비(-VAT)",
@@ -1373,8 +1434,7 @@
       const productType = row.__productType;
       const campaignIdCol = resolveField(fp, platform, "campaignId");
       if (!campaignIdCol) continue; // 쇼핑검색광고(카탈로그)는 캠페인ID가 없음
-      const dateCol = resolveField(fp, platform, "date");
-      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      const date = row.__date;
       if (!date) continue;
       const month = String(Number(monthOf(date)));
       const campaignIdRaw = row[campaignIdCol];
@@ -1393,7 +1453,7 @@
       g.productType,
       g.campaignRaw,
       ...gfaMetricValues(g.metrics),
-      "-",
+      Number.isFinite(g.metrics.cost) ? Math.round(naverVatExcludedCost(g.metrics.cost) * 100) / 100 : "-",
     ]);
   }
 
@@ -1408,8 +1468,7 @@
       const productType = row.__productType;
       const productIdCol = resolveField(fp, platform, "shoppingProductId");
       if (!productIdCol) continue;
-      const dateCol = resolveField(fp, platform, "date");
-      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      const date = row.__date;
       if (!date) continue;
       const month = String(Number(monthOf(date)));
       const productIdRaw = row[productIdCol];
@@ -1431,7 +1490,7 @@
         g.productType,
         g.campaignRaw,
         ...gfaMetricValues(g.metrics),
-        "-",
+        Number.isFinite(g.metrics.cost) ? Math.round(naverVatExcludedCost(g.metrics.cost) * 100) / 100 : "-",
       ];
     });
   }
@@ -1486,9 +1545,8 @@
       const fp = row.__filePath;
       const hourlyCol = resolveField(fp, platform, "hourly");
       const pcMobileCol = resolveField(fp, platform, "pcMobile");
-      const dateCol = resolveField(fp, platform, "date");
-      if (!hourlyCol || !pcMobileCol || !dateCol) continue; // 쇼핑검색 일별 리포트만
-      const date = parseDateLoose(row[dateCol]);
+      if (!hourlyCol || !pcMobileCol) continue; // 쇼핑검색 일별 리포트만
+      const date = row.__date;
       if (!date) continue;
       const campaignCol = resolveField(fp, platform, "campaign");
       const groupCol = resolveField(fp, platform, "group");
