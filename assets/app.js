@@ -149,7 +149,14 @@
   const state = {
     manifest: { files: [] },
     selectedPaths: new Set(),
-    rows: [], // 원본 raw 행 (플랫폼/파일 태그 포함)
+    rows: [], // 원본 raw 행 (플랫폼/파일 태그 포함) - RAW 다운로드 버튼들이 이걸 쓴다
+    // 표1~4/슬라이서용 가벼운 버전. 쿠팡 키워드 리포트(PA)는 캠페인당
+    // 키워드별로 수십만 행까지 쪼개져 있는데, 표1~4는 품목/상품구분/캠페인
+    // 단위로만 묶어서 보여줘서 키워드 단위가 전혀 필요 없다. 그래서 키워드
+    // 차원을 미리 합쳐서(buildDashboardRows) 표1~4가 훑는 행 수를 크게
+    // 줄인다. RAW 다운로드(쿠팡 키워드_RAW 등)는 키워드가 필요해서 이 가벼운
+    // 버전이 아니라 원본 rows를 그대로 쓴다.
+    dashboardRows: [],
     colsByFile: new Map(), // filePath -> Set(원본 컬럼명)
     indexMaps: null, // INDEX/ 품목 분류 파일에서 만든 조회용 맵 (쿠팡 전용)
     gfaIndexMaps: null, // 리포트양식/ GFA 양식 파일의 품목 조회용 맵 (네이버 전용)
@@ -389,7 +396,7 @@
     const months = new Set();
     const productTypes = new Set();
     const itemCategories = new Set();
-    for (const row of state.rows) {
+    for (const row of state.dashboardRows) {
       if (row.__platform !== platform) continue;
       const date = row.__date;
       if (date) {
@@ -707,6 +714,7 @@
     state.rows = allRows;
     computeColsByFile();
     precomputeRowMeta();
+    buildDashboardRows();
     renderAll();
     const banner = el("loadingBanner");
     if (banner) banner.hidden = true;
@@ -775,6 +783,76 @@
     }
   }
 
+  // 쿠팡 PA 키워드 리포트처럼 "키워드" 컬럼이 있는 파일만, 날짜+캠페인ID+
+  // 캠페인명+그룹명+VIID+광고집행상품명+광고전환매출발생상품명 단위로(즉
+  // 표1~4가 보는 모든 차원은 그대로 두고 키워드만) 묶어서 노출수/클릭수/
+  // 광고비/전환수/전환매출만 합산한 가벼운 행을 만든다. 품목/구분은 이
+  // 그룹 안에서 전부 같은 값이라(캠페인ID/캠페인명/그룹명/VIID가 품목
+  // 조회 키라서) 대표로 하나만 가져오면 된다.
+  const DASHBOARD_METRIC_FIELDS = ["cost", "impressions", "clicks", "conversions", "revenue"];
+
+  function buildDashboardRows() {
+    const toAggregate = new Map(); // filePath -> rows
+    const passthrough = [];
+    for (const row of state.rows) {
+      const fp = row.__filePath;
+      if (row.__platform === "coupang" && resolveField(fp, "coupang", "keyword")) {
+        if (!toAggregate.has(fp)) toAggregate.set(fp, []);
+        toAggregate.get(fp).push(row);
+      } else {
+        passthrough.push(row);
+      }
+    }
+    const aggregated = [];
+    for (const [fp, rows] of toAggregate) {
+      const platform = "coupang";
+      const keyCols = {
+        campaignId: resolveField(fp, platform, "campaignId"),
+        campaign: resolveField(fp, platform, "campaign"),
+        group: resolveField(fp, platform, "group"),
+        viid: resolveField(fp, platform, "viid"),
+        execProductName: resolveField(fp, platform, "execProductName"),
+      };
+      const soldProductCol = state.colsByFile.get(fp)?.has("광고전환매출발생 상품명") ? "광고전환매출발생 상품명" : null;
+      const metricCols = {};
+      for (const f of DASHBOARD_METRIC_FIELDS) metricCols[f] = resolveField(fp, platform, f);
+      const groups = new Map();
+      for (const row of rows) {
+        const key = [
+          row.__date,
+          ...Object.values(keyCols).map((c) => (c ? row[c] : "")),
+          soldProductCol ? row[soldProductCol] : "",
+        ].join("\u0001");
+        let g = groups.get(key);
+        if (!g) {
+          g = {
+            __platform: row.__platform,
+            __file: row.__file,
+            __filePath: fp,
+            __productType: row.__productType,
+            __date: row.__date,
+            __item: row.__item,
+            __subItem: row.__subItem,
+          };
+          for (const name of Object.keys(keyCols)) {
+            const col = keyCols[name];
+            if (col) g[col] = row[col];
+          }
+          if (soldProductCol) g[soldProductCol] = row[soldProductCol];
+          groups.set(key, g);
+        }
+        for (const f of DASHBOARD_METRIC_FIELDS) {
+          const col = metricCols[f];
+          if (!col) continue;
+          const n = parseNumberLoose(row[col]);
+          if (Number.isFinite(n)) g[col] = (g[col] || 0) + n;
+        }
+      }
+      aggregated.push(...groups.values());
+    }
+    state.dashboardRows = passthrough.concat(aggregated);
+  }
+
   // ---------- 집계 ----------
 
   // 네이버 raw의 "총비용"은 매체에서 추출할 때부터 VAT 포함 금액으로 내려와서,
@@ -826,7 +904,7 @@
   // 한 가지 기준으로만 묶는다).
   function computeTable1(platform) {
     const groups = new Map();
-    for (const row of state.rows) {
+    for (const row of state.dashboardRows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
       const date = row.__date;
@@ -854,7 +932,7 @@
   // 표2. 상품구분 기준 전체기간 합산
   function computeTable2(platform) {
     const groups = new Map();
-    for (const row of state.rows) {
+    for (const row of state.dashboardRows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
       const date = row.__date;
@@ -869,7 +947,7 @@
   // 표3. 주차 기준 합산(상품구분 구분 없이 전체 합산)
   function computeTable3(platform) {
     const groups = new Map();
-    for (const row of state.rows) {
+    for (const row of state.dashboardRows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
       const date = row.__date;
@@ -885,7 +963,7 @@
   // 표4. 상품구분+상품명 기준 합산 후 전환매출 상위 10개
   function computeTable4(platform) {
     const groups = new Map();
-    for (const row of state.rows) {
+    for (const row of state.dashboardRows) {
       if (row.__platform !== platform) continue;
       const fp = row.__filePath;
       const date = row.__date;
