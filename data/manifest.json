@@ -17,6 +17,30 @@
       "name": "A01703872_pa_daily_keyword_하만_PA_20261001_20261027.xlsx",
       "path": "data/coupang/A01703872_pa_daily_keyword_하만_PA_20261001_20261027.xlsx",
       "size": 769618
+    },
+    {
+      "platform": "naver",
+      "name": "네이버_GFA_애드부스트_261001~261027.csv",
+      "path": "data/naver/네이버_GFA_애드부스트_261001~261027.csv",
+      "size": 283716
+    },
+    {
+      "platform": "naver",
+      "name": "네이버_GFA_카탈로그_261001~261027.csv",
+      "path": "data/naver/네이버_GFA_카탈로그_261001~261027.csv",
+      "size": 106920
+    },
+    {
+      "platform": "naver",
+      "name": "네이버_쇼핑검색광고_검색어_월기준,1919967_261001~261027.csv",
+      "path": "data/naver/네이버_쇼핑검색광고_검색어_월기준,1919967_261001~261027.csv",
+      "size": 2440508
+    },
+    {
+      "platform": "naver",
+      "name": "네이버_쇼핑검색광고_위클리,1919967_261001~261027.csv",
+      "path": "data/naver/네이버_쇼핑검색광고_위클리,1919967_261001~261027.csv",
+      "size": 233463
     }
   ],
   "indexFiles": [
