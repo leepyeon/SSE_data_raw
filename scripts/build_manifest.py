@@ -49,6 +49,10 @@ def build():
             full_cache = cache_dir / (data_path.name + ".full.json")
             if full_cache.exists():
                 entry["fullCache"] = full_cache.relative_to(ROOT).as_posix()
+            # keywordCache = 캠페인·월별 광고비 상위 20개 키워드(대시보드 키워드 표용)
+            keyword_cache = cache_dir / (data_path.name + ".keywords.json")
+            if keyword_cache.exists():
+                entry["keywordCache"] = keyword_cache.relative_to(ROOT).as_posix()
             files.append(entry)
 
     # INDEX/ 폴더: 쿠팡 캠페인의 '품목' 분류표(캠페인ID/VIID -> 품목). 리포트가
