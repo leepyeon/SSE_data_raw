@@ -20,24 +20,6 @@
     },
     {
       "platform": "naver",
-      "name": "NAVER_쇼핑검색광고(카탈로그)_20260914~20260916.csv",
-      "path": "data/naver/NAVER_쇼핑검색광고(카탈로그)_20260914~20260916.csv",
-      "size": 62259
-    },
-    {
-      "platform": "naver",
-      "name": "NAVER_애드부스트_20260915~20260921.csv",
-      "path": "data/naver/NAVER_애드부스트_20260915~20260921.csv",
-      "size": 5860
-    },
-    {
-      "platform": "naver",
-      "name": "NAVER_카탈로그_20260915-20260921.csv",
-      "path": "data/naver/NAVER_카탈로그_20260915-20260921.csv",
-      "size": 4676
-    },
-    {
-      "platform": "naver",
       "name": "네이버 쇼핑검색광고_검색어_RAW_261027~261027.csv",
       "path": "data/naver/네이버 쇼핑검색광고_검색어_RAW_261027~261027.csv",
       "size": 153212
