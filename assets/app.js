@@ -54,6 +54,14 @@
       // 캠페인ID/상품ID 자체가 없어서 둘 다 안 잡히고, 카탈로그는 캠페인ID만 있다.
       campaignId: "캠페인 ID",
       shoppingProductId: "쇼핑몰 상품 ID",
+      // 쇼핑검색광고(카탈로그형) RAW 다운로드용. PC/모바일 매체·시간대별·
+      // 평균노출순위는 쇼핑검색광고(카탈로그) 일별 리포트에만 있고, 검색어는
+      // "쇼핑검색_검색어_RAW" 리포트에만 있어서 이 컬럼의 존재 여부로 두
+      // 리포트를 구분한다.
+      pcMobile: "PC/모바일 매체",
+      hourly: "시간대별",
+      avgRank: "평균노출순위",
+      keyword: "검색어",
     },
   };
 
@@ -320,6 +328,17 @@
 
   function monthOf(dateStr) {
     return dateStr.slice(5, 7);
+  }
+
+  // "쇼핑검색_검색어_RAW" 리포트처럼 행에 날짜 컬럼이 없고 파일명에만 날짜
+  // 범위가 있는 경우("..._261027~261027.csv", "..._20260914~20260916.csv")
+  // 쓰는 보조 함수. 범위의 시작일을 대표 날짜로 쓴다.
+  function parseDateFromFileName(fileName) {
+    const m = String(fileName || "").match(/(\d{6,8})\s*[~-]/);
+    if (!m) return null;
+    let s = m[1];
+    if (s.length === 6) s = `20${s}`;
+    return parseDateLoose(s);
   }
 
   // "YYYY-MM-DD" -> CE/MX 주간RAW 양식이 쓰는 "N월 M주차" (그 달 1일부터
@@ -1386,26 +1405,140 @@
 
   // ---------- 쇼핑검색광고(카탈로그형) RAW 다운로드 ----------
   // "리포트양식/네이버_쇼핑검색광고_월간리포트양식RAW.xlsb"의 네이버_RAW/네이버
-  // 키워드_RAW 시트와 같은 모양으로 헤더만 만들어둔다. 두 시트 모두 지금은 데이터
-  // 없이 비어있다:
+  // 키워드_RAW 시트와 같은 모양으로 만든다.
   //   - 네이버_RAW의 "품목명"/"모델명"은 쇼핑검색광고(카탈로그) raw에 상품/모델
-  //     컬럼이 없고, 캠페인/광고그룹명 표기 방식이 파일마다 달라서(자동 생성된
-  //     "CN~/FF~" 코드형, 수동으로 "쇼핑검색_<품목>"처럼 지은 이름형) 추측으로
-  //     채우면 사업부 집계가 틀릴 위험이 있어 비워둔다.
-  //   - 네이버 키워드_RAW의 "검색어"는 지금 올라온 네이버 raw 어디에도 해당
-  //     컬럼이 없어서 비워둔다.
+  //     컬럼이 없고, 캠페인/광고그룹명 표기 방식이 캠페인마다 달라서(자동
+  //     생성된 "CN~/FF~" 코드형, 수동으로 "쇼핑검색_<품목>"처럼 지은 이름형)
+  //     추측으로 채우면 사업부 집계가 틀릴 위험이 있어 일단 비워두고, 대신
+  //     대시보드 표1(캠페인명/그룹명 기준)과 맞춰볼 수 있게 "참고_캠페인"/
+  //     "참고_광고그룹" 2개 컬럼을 뒤에 추가해서 수동으로 채울 수 있게 한다.
+  //   - 네이버 키워드_RAW는 별도로 올라온 "...쇼핑검색광고_검색어_RAW_..."
+  //     리포트(캠페인유형/캠페인/광고그룹/PC-모바일매체/검색어/노출수/클릭수/
+  //     총비용, 날짜 컬럼은 없고 파일명에만 날짜 범위가 있음)에서 가져온다.
+  //     "모델명"은 이 리포트의 광고그룹 값이 이미 상품 모델코드라 그대로
+  //     옮기고, "품목"은 역시 분류 판단이 필요해 비워둔다(모델명으로 대시보드
+  //     와 맞춰보고 수동으로 채울 수 있다).
   const NAVER_SHOPPING_RAW_HEADER = [
     "년도", "집행월", "품목명", "모델명", "PC/MO", "시간대",
     "노출수", "클릭수", "총비용(VAT포함,원)", "평균노출순위",
+    "참고_캠페인", "참고_광고그룹",
   ];
   const NAVER_SHOPPING_KEYWORD_HEADER = [
     "년도", "월", "품목", "모델명", "검색어", "노출수", "클릭수", "총비용(VAT포함,원)",
   ];
 
+  // 일별 쇼핑검색광고(카탈로그) 리포트(PC/모바일 매체+시간대별까지 쪼개진 것)만
+  // 대상으로, 집행년+집행월+캠페인+광고그룹+PC/MO+시간대 단위로 합산한다.
+  // 평균노출순위는 노출수로 가중평균한다.
+  function buildNaverShoppingRawRows() {
+    const platform = "naver";
+    const groups = new Map();
+    for (const row of state.rows) {
+      if (row.__platform !== platform) continue;
+      const fp = row.__filePath;
+      const hourlyCol = resolveField(fp, platform, "hourly");
+      const pcMobileCol = resolveField(fp, platform, "pcMobile");
+      const dateCol = resolveField(fp, platform, "date");
+      if (!hourlyCol || !pcMobileCol || !dateCol) continue; // 쇼핑검색 일별 리포트만
+      const date = parseDateLoose(row[dateCol]);
+      if (!date) continue;
+      const campaignCol = resolveField(fp, platform, "campaign");
+      const groupCol = resolveField(fp, platform, "group");
+      const impressionsCol = resolveField(fp, platform, "impressions");
+      const clicksCol = resolveField(fp, platform, "clicks");
+      const costCol = resolveField(fp, platform, "cost");
+      const rankCol = resolveField(fp, platform, "avgRank");
+      const campaignRaw = campaignCol ? (row[campaignCol] ?? "-") : "-";
+      const groupRaw = groupCol ? (row[groupCol] ?? "-") : "-";
+      const pcMobileRaw = row[pcMobileCol] ?? "-";
+      const hourlyRaw = row[hourlyCol] ?? "-";
+      const month = String(Number(monthOf(date)));
+      const key = [yearOf(date), month, campaignRaw, groupRaw, pcMobileRaw, hourlyRaw].join("\u0001");
+      if (!groups.has(key)) {
+        groups.set(key, {
+          year: yearOf(date), month, campaignRaw, groupRaw, pcMobileRaw, hourlyRaw,
+          impressions: 0, clicks: 0, cost: 0, rankWeighted: 0, rankWeight: 0,
+        });
+      }
+      const g = groups.get(key);
+      const impressions = parseNumberLoose(row[impressionsCol]) || 0;
+      g.impressions += impressions;
+      g.clicks += parseNumberLoose(row[clicksCol]) || 0;
+      g.cost += parseNumberLoose(row[costCol]) || 0;
+      const rank = rankCol ? parseNumberLoose(row[rankCol]) : NaN;
+      if (Number.isFinite(rank)) {
+        g.rankWeighted += rank * impressions;
+        g.rankWeight += impressions;
+      }
+    }
+    return [...groups.values()].map((g) => [
+      `${g.year}년`,
+      `${g.month}월`,
+      "",
+      "",
+      g.pcMobileRaw,
+      g.hourlyRaw,
+      g.impressions,
+      g.clicks,
+      g.cost,
+      g.rankWeight > 0 ? Math.round((g.rankWeighted / g.rankWeight) * 10) / 10 : "-",
+      g.campaignRaw,
+      g.groupRaw,
+    ]);
+  }
+
+  // "검색어" 컬럼이 있는 리포트만 대상(= 쇼핑검색_검색어_RAW). 이 리포트는
+  // 행에 날짜가 없어서 파일명의 날짜 범위로 집행년/집행월을 구한다.
+  function buildNaverShoppingKeywordRows() {
+    const platform = "naver";
+    const groups = new Map();
+    for (const row of state.rows) {
+      if (row.__platform !== platform) continue;
+      const fp = row.__filePath;
+      const keywordCol = resolveField(fp, platform, "keyword");
+      if (!keywordCol) continue;
+      const date = parseDateFromFileName(row.__file);
+      if (!date) continue;
+      const groupCol = resolveField(fp, platform, "group");
+      const impressionsCol = resolveField(fp, platform, "impressions");
+      const clicksCol = resolveField(fp, platform, "clicks");
+      const costCol = resolveField(fp, platform, "cost");
+      const keywordRaw = row[keywordCol] ?? "-";
+      const modelRaw = groupCol ? (row[groupCol] ?? "-") : "-";
+      const month = String(Number(monthOf(date)));
+      const key = [yearOf(date), month, modelRaw, keywordRaw].join("\u0001");
+      if (!groups.has(key)) {
+        groups.set(key, { year: yearOf(date), month, modelRaw, keywordRaw, impressions: 0, clicks: 0, cost: 0 });
+      }
+      const g = groups.get(key);
+      g.impressions += parseNumberLoose(row[impressionsCol]) || 0;
+      g.clicks += parseNumberLoose(row[clicksCol]) || 0;
+      g.cost += parseNumberLoose(row[costCol]) || 0;
+    }
+    return [...groups.values()].map((g) => [
+      `${g.year}년`,
+      `${g.month}월`,
+      "",
+      g.modelRaw,
+      g.keywordRaw,
+      g.impressions,
+      g.clicks,
+      g.cost,
+    ]);
+  }
+
   el("downloadShoppingSearchBtn").addEventListener("click", () => {
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([NAVER_SHOPPING_RAW_HEADER]), "네이버_RAW");
-    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([NAVER_SHOPPING_KEYWORD_HEADER]), "네이버 키워드_RAW");
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.aoa_to_sheet([NAVER_SHOPPING_RAW_HEADER, ...buildNaverShoppingRawRows()]),
+      "네이버_RAW"
+    );
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.aoa_to_sheet([NAVER_SHOPPING_KEYWORD_HEADER, ...buildNaverShoppingKeywordRows()]),
+      "네이버 키워드_RAW"
+    );
     XLSX.writeFile(workbook, `네이버_쇼핑검색광고_월간리포트RAW_${new Date().toISOString().slice(0, 10)}.xlsx`);
   });
 
