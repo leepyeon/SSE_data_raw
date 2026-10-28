@@ -102,7 +102,9 @@
   <div class="card" id="rawDownloadCard">
     <h2>원본 다운로드</h2>
     <div class="toolbar-actions">
-      <button class="primary" id="downloadReportBtn" type="button">리포트RAW 다운받기</button>
+      <button class="primary platform-only" data-platform="coupang" id="downloadReportBtn" type="button">리포트RAW 다운받기</button>
+      <button class="primary platform-only" data-platform="naver" id="downloadGfaReportBtn" type="button">GFA리포트RAW 다운받기</button>
+      <button class="primary platform-only" data-platform="naver" id="downloadShoppingSearchBtn" type="button">쇼핑검색광고(카탈로그형) RAW 다운받기</button>
     </div>
   </div>
 
@@ -112,6 +114,6 @@
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <!-- app.js를 바꿀 때마다 아래 v= 숫자를 올려서, 예전 파일이 브라우저에 캐시되어 남아있는 문제를 방지합니다. -->
-<script src="assets/app.js?v=19"></script>
+<script src="assets/app.js?v=21"></script>
 </body>
 </html>

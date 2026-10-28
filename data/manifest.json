@@ -48,5 +48,32 @@
       "path": "INDEX/INDEX_260929_수정.xlsb",
       "size": 107092
     }
+  ],
+  "reportFormFiles": [
+    {
+      "name": "CE_MX_주간RAW_양식.xlsb",
+      "path": "리포트양식/CE_MX_주간RAW_양식.xlsb",
+      "size": 14031201
+    },
+    {
+      "name": "네이버_GFA_RAW_양식.xlsb",
+      "path": "리포트양식/네이버_GFA_RAW_양식.xlsb",
+      "size": 19138
+    },
+    {
+      "name": "네이버_쇼핑검색광고_월간리포트양식RAW.xlsb",
+      "path": "리포트양식/네이버_쇼핑검색광고_월간리포트양식RAW.xlsb",
+      "size": 2678990
+    },
+    {
+      "name": "쿠팡_상품광고_주간리포트_양식.xlsb",
+      "path": "리포트양식/쿠팡_상품광고_주간리포트_양식.xlsb",
+      "size": 20263637
+    },
+    {
+      "name": "쿠팡상품광고_월간리포트양식RAW.xlsb",
+      "path": "리포트양식/쿠팡상품광고_월간리포트양식RAW.xlsb",
+      "size": 2603417
+    }
   ]
 }
