@@ -350,7 +350,32 @@
     const sunday = new Date(monday);
     sunday.setUTCDate(monday.getUTCDate() + 6);
     const fmt = (x) => `${String(x.getUTCMonth() + 1).padStart(2, "0")}.${String(x.getUTCDate()).padStart(2, "0")}`;
-    return { key: formatDateUTC(monday), label: `${fmt(monday)}~${fmt(sunday)}` };
+    // 몇 월 몇 주차인지는 그 주의 목요일이 속한 달로 정한다(주의 과반이 있는
+    // 달). 예: 09.28~10.04는 목요일이 10.01이라 10월 1주차, 10.05~10.11은
+    // 10월 2주차, 10.26~11.01은 10월 5주차.
+    const thursday = new Date(monday);
+    thursday.setUTCDate(monday.getUTCDate() + 3);
+    return {
+      key: formatDateUTC(monday),
+      label: `${fmt(monday)}~${fmt(sunday)}`,
+      year: thursday.getUTCFullYear(),
+      month: thursday.getUTCMonth() + 1,
+      n: Math.ceil(thursday.getUTCDate() / 7),
+    };
+  }
+
+  // 주차 키 목록이 모두 같은 년/월이면 "2주차", 여러 달에 걸치면 "10월 2주차"
+  // 처럼 달을 붙여서 구분되게 한다.
+  function weekNameFormatter(keys) {
+    const months = new Set(keys.map((k) => {
+      const w = weekOf(k);
+      return `${w.year}-${w.month}`;
+    }));
+    const withMonth = months.size > 1;
+    return (key) => {
+      const w = weekOf(key);
+      return withMonth ? `${w.month}월 ${w.n}주차` : `${w.n}주차`;
+    };
   }
 
   // 필터/집계에서 같은 날짜로 수십만 번 부르므로 날짜별로 기억해 둔다.
@@ -1117,10 +1142,11 @@
       const week = weekOf(date);
       accumulateRow(groups, week.key, { weekKey: week.key, weekLabel: week.label }, row, fp, platform);
     }
-    // 최근 2개 주차만 보여준다(그 둘의 증감율을 맨 아래 줄에 붙임).
-    return finalizeGroups(groups)
-      .sort((a, b) => a.weekKey.localeCompare(b.weekKey))
-      .slice(-2);
+    // 필터에 걸린 주차를 모두 보여준다(최근 2개 주차의 증감율은 맨 아래 줄).
+    const rows = finalizeGroups(groups).sort((a, b) => a.weekKey.localeCompare(b.weekKey));
+    const name = weekNameFormatter(rows.map((r) => r.weekKey));
+    for (const r of rows) r.weekLabel = `${name(r.weekKey)} (${r.weekLabel})`;
+    return rows;
   }
 
   // 표4. 상품구분+상품명 기준 합산 후 전환매출 상위 10개
@@ -1199,7 +1225,12 @@
     const f = state.filters[platform];
     renderSlicerGroup("yearSlicer", options.years, f.years, (y) => `${y}년`);
     renderSlicerGroup("monthSlicer", options.months, f.months, (m) => `${Number(m)}월`);
-    renderSlicerGroup("weekSlicer", options.weeks, f.weeks, (k) => weekOf(k).label);
+    renderSlicerGroup("weekSlicer", options.weeks, f.weeks, weekNameFormatter(options.weeks));
+    // 버튼에 마우스를 올리면 실제 기간(월~일)이 보이게
+    for (const btn of el("weekSlicer").querySelectorAll(".slicer-btn")) {
+      const i = [...btn.parentNode.children].indexOf(btn);
+      btn.title = weekOf(options.weeks[i]).label;
+    }
     renderSlicerGroup("productTypeSlicer", options.productTypes, f.productTypes);
     renderSlicerGroup("itemCategorySlicer", options.itemCategories, f.itemCategories);
   }
@@ -1269,6 +1300,7 @@
 
   function renderTable1() {
     const rows = computeTable1(state.activePlatform);
+    el("table1Title").textContent = state.activePlatform === "coupang" ? "품목별 데이터" : "캠페인별 데이터";
     const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
     state.table1Page = Math.min(Math.max(1, state.table1Page), totalPages);
     const pageRows = rows.slice((state.table1Page - 1) * PAGE_SIZE, state.table1Page * PAGE_SIZE);
@@ -1293,7 +1325,7 @@
     const tr = document.createElement("tr");
     tr.className = "week-compare-row";
     const labelTd = document.createElement("td");
-    labelTd.textContent = "증감율";
+    labelTd.textContent = "최근 2개 주차 증감율";
     tr.appendChild(labelTd);
     for (const col of METRIC_COLUMNS) {
       const td = document.createElement("td");
@@ -1330,11 +1362,10 @@
     renderMetricTable(el("table4Head"), el("table4Body"), TABLE4_COLS, rows, "판매 데이터가 없습니다.");
   }
 
-  // ---------- 일자별 광고비·매출 그래프 ----------
-  // 지금 필터 기준으로 일자별 광고비(막대)와 전환매출(선)을 그린다. 매출이
-  // 광고비의 수십~수백 배(ROAS 수천~수만%)라 금액 축 하나로는 광고비 막대가
-  // 바닥에 붙어 안 보여서, 왼쪽 축 = 광고비, 오른쪽 축 = 매출로 나누고 두
-  // 축 모두 4칸으로 맞춰 눈금선을 공유한다. 라이브러리 없이 SVG로 직접 그린다.
+  // ---------- 일자별 광고비·ROAS 그래프 ----------
+  // 지금 필터 기준으로 일자별 광고비(막대, 왼쪽 축 = 금액)와 ROAS(선, 오른쪽
+  // 축 = %)를 그린다. 단위가 달라 축을 나누고, 두 축 모두 4칸으로 맞춰
+  // 눈금선을 공유한다. 라이브러리 없이 SVG로 직접 그린다.
   function computeDaily(platform) {
     const groups = new Map();
     for (const row of state.rows) {
@@ -1387,21 +1418,29 @@
     }
     const width = Math.max(300, area.clientWidth || 800);
     const height = 280;
-    const m = { top: 26, right: 52, bottom: 28, left: 52 };
-    const plotW = width - m.left - m.right;
-    const plotH = height - m.top - m.bottom;
     const TICKS = 4;
     const costStep = niceStep(Math.max(1, ...rows.map((r) => r.cost || 0)), TICKS);
-    const revStep = niceStep(Math.max(1, ...rows.map((r) => r.revenue || 0)), TICKS);
+    const roasStep = niceStep(Math.max(1, ...rows.map((r) => (Number.isFinite(r.roas) ? r.roas : 0))), TICKS);
+    const roasLabel = (v) => `${Math.round(v).toLocaleString("ko-KR")}%`;
+    // 축 숫자가 잘리지 않게, 가장 긴 눈금 글자 길이만큼 좌우 여백을 잡는다.
+    const labelW = (text) => 12 + String(text).length * 7;
+    const m = {
+      top: 26,
+      right: Math.max(44, labelW(roasLabel(roasStep * TICKS))),
+      bottom: 28,
+      left: Math.max(44, labelW(shortMoney(costStep * TICKS))),
+    };
+    const plotW = width - m.left - m.right;
+    const plotH = height - m.top - m.bottom;
     const yCost = (v) => m.top + plotH - (v / (costStep * TICKS)) * plotH;
-    const yRev = (v) => m.top + plotH - (v / (revStep * TICKS)) * plotH;
+    const yRoas = (v) => m.top + plotH - (v / (roasStep * TICKS)) * plotH;
     const band = plotW / rows.length;
     const barW = Math.max(2, Math.min(24, band * 0.6));
     const cx = (i) => m.left + band * i + band / 2;
 
-    const svg = svgEl("svg", { width, height, viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "일자별 광고비와 매출" });
+    const svg = svgEl("svg", { width, height, viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": "일자별 광고비와 ROAS" });
 
-    // 눈금선 + 왼쪽(광고비)/오른쪽(매출) 금액
+    // 눈금선 + 왼쪽(광고비 금액)/오른쪽(ROAS %)
     for (let k = 0; k <= TICKS; k++) {
       const yy = yCost(costStep * k);
       svg.appendChild(svgEl("line", { x1: m.left, x2: width - m.right, y1: yy, y2: yy, class: k === 0 ? "chart-baseline" : "chart-grid" }));
@@ -1409,14 +1448,14 @@
       left.textContent = shortMoney(costStep * k);
       svg.appendChild(left);
       const right = svgEl("text", { x: width - m.right + 8, y: yy + 4, "text-anchor": "start", class: "chart-axis-label" });
-      right.textContent = shortMoney(revStep * k);
+      right.textContent = roasLabel(roasStep * k);
       svg.appendChild(right);
     }
     const leftTitle = svgEl("text", { x: m.left - 8, y: 12, "text-anchor": "end", class: "chart-axis-title" });
     leftTitle.textContent = "광고비";
     svg.appendChild(leftTitle);
     const rightTitle = svgEl("text", { x: width - m.right + 8, y: 12, "text-anchor": "start", class: "chart-axis-title" });
-    rightTitle.textContent = "매출";
+    rightTitle.textContent = "ROAS";
     svg.appendChild(rightTitle);
 
     // x축 날짜 (겹치지 않게 일정 간격으로만 표시)
@@ -1440,11 +1479,21 @@
       svg.appendChild(svgEl("path", { d: barPath(cx(i) - barW / 2, top, barW, m.top + plotH - top, 4), class: "chart-bar" }));
     });
 
-    // 매출 선 + 점
-    const pts = rows.map((r, i) => `${cx(i)},${yRev(r.revenue || 0)}`).join(" ");
-    svg.appendChild(svgEl("polyline", { points: pts, class: "chart-line" }));
+    // ROAS 선 + 점 (광고비가 0인 날은 ROAS가 없어서 선을 끊는다)
+    let run = [];
+    const flush = () => {
+      if (run.length > 1) svg.appendChild(svgEl("polyline", { points: run.join(" "), class: "chart-line" }));
+      run = [];
+    };
+    rows.forEach((r, i) => {
+      if (Number.isFinite(r.roas)) run.push(`${cx(i)},${yRoas(r.roas)}`);
+      else flush();
+    });
+    flush();
     if (band >= 10) {
-      rows.forEach((r, i) => svg.appendChild(svgEl("circle", { cx: cx(i), cy: yRev(r.revenue || 0), r: 4, class: "chart-dot" })));
+      rows.forEach((r, i) => {
+        if (Number.isFinite(r.roas)) svg.appendChild(svgEl("circle", { cx: cx(i), cy: yRoas(r.roas), r: 4, class: "chart-dot" }));
+      });
     }
 
     // 일자별로 넓은 투명 영역을 깔아서 마우스/터치로 값 확인
@@ -1458,8 +1507,7 @@
       tooltip.innerHTML =
         `<div class="tt-title">${r.date.replace(/-/g, ".")}</div>` +
         `<div><span class="tt-swatch tt-bar"></span>광고비 <b>${formatMetric(r.cost, "money")}</b></div>` +
-        `<div><span class="tt-swatch tt-line"></span>매출 <b>${formatMetric(r.revenue, "money")}</b></div>` +
-        `<div class="tt-muted">ROAS ${formatMetric(r.roas, "pct0")}</div>`;
+        `<div><span class="tt-swatch tt-line"></span>ROAS <b>${formatMetric(r.roas, "pct0")}</b></div>`;
       tooltip.hidden = false;
       const areaBox = area.getBoundingClientRect();
       const x = cx(i);
