@@ -609,11 +609,17 @@
 
   // 캠페인ID/캠페인명/그룹명/VIID 각각을 단독 키로 조회하는 맵 4개를 만든다
   // (여러 조건을 동시에 만족해야 하는 조합 키는 쓰지 않는다). 값은 {item,subItem}.
+  // 단, 그룹명이 인덱스에서 서로 다른 품목에 걸쳐 있으면(예: 쿠팡 기본값
+  // "새 광고 그룹"은 TV/청소기/냉장고 등 여러 캠페인에 공통) 그 그룹명만으로는
+  // 품목을 알 수 없으므로 조회 키에서 뺀다. 그래야 인덱스에 없는 새 캠페인이
+  // 마지막 행의 엉뚱한 품목으로 가지 않고, 다음 기준(VIID)으로 찾거나 그래도
+  // 없으면 "미분류"로 보인다. 품목은 같고 세부품목만 다른 그룹명은 그대로 쓴다.
   function buildIndexMaps(sheet) {
     const byCampaignId = new Map();
     const byCampaignName = new Map();
     const byGroupName = new Map();
     const byViid = new Map();
+    const groupNameItems = new Map(); // 그룹명 -> 그 그룹명이 쓰인 품목들
     const range = XLSX.utils.decode_range(sheet["!ref"] || "A1:A1");
     const lastRow = range.e.r + 1; // 1행이 헤더이므로 2행부터 lastRow까지 순회
     for (let r = 2; r <= lastRow; r++) {
@@ -626,7 +632,11 @@
         const entry = { item, subItem };
         if (cid) byCampaignId.set(cid, entry);
         if (campaignName) byCampaignName.set(campaignName, entry);
-        if (groupName) byGroupName.set(groupName, entry);
+        if (groupName) {
+          byGroupName.set(groupName, entry);
+          if (!groupNameItems.has(groupName)) groupNameItems.set(groupName, new Set());
+          groupNameItems.get(groupName).add(item);
+        }
       }
       const vid = normalizeId(sheetCellText(sheet, "I", r)); // I열 VIID
       const rightItem = sheetCellText(sheet, "K", r); // K열 품목
@@ -634,6 +644,9 @@
         const rightSubItem = sheetCellText(sheet, "L", r) || rightItem; // L열 세부품목
         byViid.set(vid, { item: rightItem, subItem: rightSubItem });
       }
+    }
+    for (const [groupName, items] of groupNameItems) {
+      if (items.size > 1) byGroupName.delete(groupName);
     }
     return { byCampaignId, byCampaignName, byGroupName, byViid };
   }
