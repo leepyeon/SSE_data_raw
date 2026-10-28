@@ -616,7 +616,6 @@
     if (platform !== "coupang") return null;
     const maps = state.indexMaps;
     const unclassified = { item: "미분류", subItem: "미분류" };
-    if (!maps) return unclassified;
     const cidCol = resolveField(fp, platform, "campaignId");
     const campaignCol = resolveField(fp, platform, "campaign");
     const groupCol = resolveField(fp, platform, "group");
@@ -627,6 +626,12 @@
       groupName: groupCol ? String(row[groupCol] ?? "").trim() : "",
       viid: viidCol ? normalizeId(row[viidCol]) : "",
     };
+    // 캠페인명에 "탭"/"태블릿"이 있으면 INDEX 조회와 상관없이 항상 태블릿으로
+    // 분류한다(새 캠페인이 계속 생겨도 INDEX 파일을 매번 안 고쳐도 되게).
+    if (/탭|태블릿/.test(values.campaignName)) {
+      return { item: "태블릿", subItem: "태블릿" };
+    }
+    if (!maps) return unclassified;
     const mapFor = {
       campaignId: maps.byCampaignId,
       campaignName: maps.byCampaignName,
