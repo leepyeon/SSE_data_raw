@@ -1,5 +1,24 @@
 {
-  "files": [],
+  "files": [
+    {
+      "platform": "coupang",
+      "name": "2620261028_A00111021_custom_report_CE_NCA_261001~261027.xlsx",
+      "path": "data/coupang/2620261028_A00111021_custom_report_CE_NCA_261001~261027.xlsx",
+      "size": 157589
+    },
+    {
+      "platform": "coupang",
+      "name": "2620261028_A00534677_custom_report_MX_NCA_261001~261027.xlsx",
+      "path": "data/coupang/2620261028_A00534677_custom_report_MX_NCA_261001~261027.xlsx",
+      "size": 397762
+    },
+    {
+      "platform": "coupang",
+      "name": "A01703872_pa_daily_keyword_하만_PA_20261001_20261027.xlsx",
+      "path": "data/coupang/A01703872_pa_daily_keyword_하만_PA_20261001_20261027.xlsx",
+      "size": 769618
+    }
+  ],
   "indexFiles": [
     {
       "name": "INDEX_260929.xlsb",
