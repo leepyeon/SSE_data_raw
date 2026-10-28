@@ -1054,13 +1054,10 @@
   }
 
 
-  // ---------- 리포트 다운로드 (쿠팡_전환상품_RAW/쿠팡 키워드_RAW 양식) ----------
-  // "리포트양식"의 CE_전환상품/MX_전환상품, CE_키워드/MX_키워드 피벗이 보여주는
-  // 집계와 같은 기준(날짜+캠페인+그룹+상품 단위로 키워드를 합쳐서 "전환상품",
-  // 날짜+캠페인+그룹+키워드 단위로 상품을 합쳐서 "키워드")으로 직접 합산해서,
-  // 쿠팡_상품광고 주간 리포트의 쿠팡_전환상품_RAW/쿠팡 키워드_RAW 시트와 같은
-  // 모양으로 만든다. 피벗 자체가 아니라 그 피벗이 보여주는 숫자만 재현하는
-  // 것이라 원본 피벗/바이너리는 건드리지 않는다.
+  // ---------- 리포트 다운로드 (쿠팡_RAW/쿠팡_전환상품_RAW/쿠팡 키워드_RAW 양식) ----------
+  // "리포트양식/쿠팡상품광고_월간리포트양식RAW.xlsb"의 세 시트와 같은 기준으로
+  // 직접 합산해서 만든다. 피벗 자체가 아니라 그 피벗이 보여주는 숫자만
+  // 재현하는 것이라 원본 피벗/바이너리는 건드리지 않는다.
   const WEEKLY_REPORT_METRIC_FIELDS = [
     "cost", "impressions", "clicks",
     "totalConv1d", "conversions", "totalRevenue1d", "revenue",
@@ -1081,8 +1078,56 @@
     );
   }
 
+  // 쿠팡_RAW: 월간 집계라 날짜/캠페인ID/그룹/VIID/상품명/키워드를 다 버리고
+  // 집행년+집행월+구분+품목명+광고유형+캠페인명+세부품목 단위로 합산한다.
+  // "예산처" 칼럼은 우리 쪽에 원본 데이터가 없어서 값은 채우지 않고 빈 칸으로
+  // 둔다(칼럼 자체는 양식과 자리를 맞추기 위해 남겨둔다).
+  const MONTHLY_RAW_HEADER = [
+    "집행 년", "집행 월", "구분", "품목명", "예산처", "광고유형", "캠페인명",
+    "광고비", "노출수", "클릭수",
+    "판매수량(1일)", "판매수량(1일,직접)", "전환매출액(1일)", "전환매출액(1일,직접)",
+    "판매수량(14일)", "판매수량(14일,직접)", "전환매출액(14일)", "전환매출액(14일,직접)",
+    "세부 품목",
+  ];
+
+  function buildMonthlyRawRows() {
+    const platform = "coupang";
+    const groups = new Map();
+    for (const row of state.rows) {
+      if (row.__platform !== platform) continue;
+      const fp = row.__filePath;
+      const productType = row.__productType;
+      const dateCol = resolveField(fp, platform, "date");
+      const date = dateCol ? parseDateLoose(row[dateCol]) : null;
+      if (!date) continue;
+      const { item, subItem } = resolveItemClassification(row, fp, platform, productType);
+      const division = classifyDivision(item);
+      if (!division || !passesFilters(platform, date, productType, item)) continue;
+      const campaignRaw = weeklyRawText(row, fp, platform, "campaign");
+      const month = String(Number(monthOf(date)));
+      const key = [yearOf(date), month, productType, item, campaignRaw, subItem].join("\u0001");
+      if (!groups.has(key)) {
+        groups.set(key, { year: yearOf(date), month, division, item, subItem, productType, campaignRaw, metrics: {} });
+      }
+      sumWeeklyMetrics(row, fp, platform, groups.get(key).metrics);
+    }
+    return [...groups.values()].map((g) => [
+      `${g.year}년`,
+      `${g.month}월`,
+      g.division,
+      g.item,
+      "",
+      g.productType,
+      g.campaignRaw,
+      ...weeklyMetricValues(g.metrics),
+      g.subItem,
+    ]);
+  }
+
+  // 쿠팡_전환상품_RAW: 월간 집계라 주차/날짜/그룹명을 버리고 집행년+집행월+
+  // 상품구분+캠페인ID+캠페인명+VIID+상품명 단위로(키워드 구분 없이) 합산.
   const CONVERSION_PRODUCT_HEADER = [
-    "집행 년", "집행 월", "주차", "날짜", "구분", "품목명", "광고유형", "캠페인 ID", "캠페인명", "그룹명",
+    "집행 년", "집행 월", "구분", "품목명", "광고유형", "캠페인 ID", "캠페인명",
     "광고집행상품 VIID", "광고집행 상품명",
     "광고비", "노출수", "클릭수",
     "판매수량(1일)", "직접 판매수량(1일)", "전환매출액(1일)", "직접 전환매출액(1일)",
@@ -1090,7 +1135,6 @@
     "세부 품목",
   ];
 
-  // 날짜+상품구분+캠페인+그룹+VIID+상품명 단위로 묶어서(키워드 구분 없이) 합산.
   function buildConversionProductRows() {
     const platform = "coupang";
     const groups = new Map();
@@ -1106,30 +1150,27 @@
       if (!division || !passesFilters(platform, date, productType, item)) continue;
       const campaignIdRaw = weeklyRawText(row, fp, platform, "campaignId");
       const campaignRaw = weeklyRawText(row, fp, platform, "campaign");
-      const groupRaw = weeklyRawText(row, fp, platform, "group");
       const viidRaw = weeklyRawText(row, fp, platform, "viid");
       const execProductNameRaw = weeklyRawText(row, fp, platform, "execProductName");
-      const key = [date, productType, campaignIdRaw, campaignRaw, groupRaw, viidRaw, execProductNameRaw].join("\u0001");
+      const month = String(Number(monthOf(date)));
+      const key = [yearOf(date), month, productType, campaignIdRaw, campaignRaw, viidRaw, execProductNameRaw].join("\u0001");
       if (!groups.has(key)) {
         groups.set(key, {
-          date, productType, division, item, subItem,
-          campaignIdRaw, campaignRaw, groupRaw, viidRaw, execProductNameRaw,
+          year: yearOf(date), month, productType, division, item, subItem,
+          campaignIdRaw, campaignRaw, viidRaw, execProductNameRaw,
           metrics: {},
         });
       }
       sumWeeklyMetrics(row, fp, platform, groups.get(key).metrics);
     }
     return [...groups.values()].map((g) => [
-      `${yearOf(g.date)}년`,
-      `${Number(monthOf(g.date))}월`,
-      weekOfMonthLabel(g.date),
-      Number(g.date.replace(/-/g, "")),
+      `${g.year}년`,
+      `${g.month}월`,
       g.division,
       g.item,
       g.productType,
       g.campaignIdRaw,
       g.campaignRaw,
-      g.groupRaw,
       g.viidRaw,
       g.execProductNameRaw,
       ...weeklyMetricValues(g.metrics),
@@ -1137,16 +1178,16 @@
     ]);
   }
 
+  // 쿠팡 키워드_RAW: PA만 대상으로, 날짜+캠페인ID+캠페인명+VIID+키워드
+  // 단위로(그룹 구분 없이) 합산. 날짜는 년/월/일로 나눠 담는다.
   const KEYWORD_HEADER = [
-    "년", "월", "주차", "날짜", "품목", "광고유형", "캠페인ID", "캠페인명", "그룹명", "키워드",
-    "광고비", "노출수", "클릭수",
+    "년", "월", "일", "품목", "광고유형", "캠페인ID", "캠페인명", "광고집행상품 VIID", "키워드",
+    "노출수", "클릭수", "광고비",
     "총 판매수량(1일)", "직접 판매수량(1일)", "총 전환매출액(1일)", "직접 전환매출액(1일)",
     "총 판매수량(14일)", "직접 판매수량(14일)", "총 전환매출액(14일)", "직접 전환매출액(14일)",
     "세부 품목",
   ];
 
-  // 키워드는 PA에만 있어서 PA만 대상으로, 날짜+캠페인+그룹+키워드 단위로
-  // 묶어서(상품 구분 없이, CE/MX 구분도 없이) 합산.
   function buildKeywordRows() {
     const platform = "coupang";
     const groups = new Map();
@@ -1162,24 +1203,23 @@
       if (!division || !passesFilters(platform, date, productType, item)) continue;
       const campaignIdRaw = weeklyRawText(row, fp, platform, "campaignId");
       const campaignRaw = weeklyRawText(row, fp, platform, "campaign");
-      const groupRaw = weeklyRawText(row, fp, platform, "group");
+      const viidRaw = weeklyRawText(row, fp, platform, "viid");
       const keywordRaw = weeklyRawText(row, fp, platform, "keyword");
-      const key = [date, campaignIdRaw, campaignRaw, groupRaw, keywordRaw].join("\u0001");
+      const key = [date, campaignIdRaw, campaignRaw, viidRaw, keywordRaw].join("\u0001");
       if (!groups.has(key)) {
-        groups.set(key, { date, productType, item, subItem, campaignIdRaw, campaignRaw, groupRaw, keywordRaw, metrics: {} });
+        groups.set(key, { date, productType, item, subItem, campaignIdRaw, campaignRaw, viidRaw, keywordRaw, metrics: {} });
       }
       sumWeeklyMetrics(row, fp, platform, groups.get(key).metrics);
     }
     return [...groups.values()].map((g) => [
-      `${yearOf(g.date)}년`,
-      `${Number(monthOf(g.date))}월`,
-      weekOfMonthLabel(g.date),
-      Number(g.date.replace(/-/g, "")),
+      Number(yearOf(g.date)),
+      Number(monthOf(g.date)),
+      Number(g.date.slice(8, 10)),
       g.item,
       g.productType,
       g.campaignIdRaw,
       g.campaignRaw,
-      g.groupRaw,
+      g.viidRaw,
       g.keywordRaw,
       ...weeklyMetricValues(g.metrics),
       g.subItem,
@@ -1192,6 +1232,11 @@
     for (const name of Object.keys(rawSheets)) {
       XLSX.utils.book_append_sheet(workbook, rawSheets[name], name);
     }
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.aoa_to_sheet([MONTHLY_RAW_HEADER, ...buildMonthlyRawRows()]),
+      "쿠팡_RAW"
+    );
     XLSX.utils.book_append_sheet(
       workbook,
       XLSX.utils.aoa_to_sheet([CONVERSION_PRODUCT_HEADER, ...buildConversionProductRows()]),
@@ -1337,6 +1382,31 @@
       "GFA_상품RAW"
     );
     XLSX.writeFile(workbook, `네이버_GFA리포트RAW_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  });
+
+  // ---------- 쇼핑검색광고(카탈로그형) RAW 다운로드 ----------
+  // "리포트양식/네이버_쇼핑검색광고_월간리포트양식RAW.xlsb"의 네이버_RAW/네이버
+  // 키워드_RAW 시트와 같은 모양으로 헤더만 만들어둔다. 두 시트 모두 지금은 데이터
+  // 없이 비어있다:
+  //   - 네이버_RAW의 "품목명"/"모델명"은 쇼핑검색광고(카탈로그) raw에 상품/모델
+  //     컬럼이 없고, 캠페인/광고그룹명 표기 방식이 파일마다 달라서(자동 생성된
+  //     "CN~/FF~" 코드형, 수동으로 "쇼핑검색_<품목>"처럼 지은 이름형) 추측으로
+  //     채우면 사업부 집계가 틀릴 위험이 있어 비워둔다.
+  //   - 네이버 키워드_RAW의 "검색어"는 지금 올라온 네이버 raw 어디에도 해당
+  //     컬럼이 없어서 비워둔다.
+  const NAVER_SHOPPING_RAW_HEADER = [
+    "년도", "집행월", "품목명", "모델명", "PC/MO", "시간대",
+    "노출수", "클릭수", "총비용(VAT포함,원)", "평균노출순위",
+  ];
+  const NAVER_SHOPPING_KEYWORD_HEADER = [
+    "년도", "월", "품목", "모델명", "검색어", "노출수", "클릭수", "총비용(VAT포함,원)",
+  ];
+
+  el("downloadShoppingSearchBtn").addEventListener("click", () => {
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([NAVER_SHOPPING_RAW_HEADER]), "네이버_RAW");
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([NAVER_SHOPPING_KEYWORD_HEADER]), "네이버 키워드_RAW");
+    XLSX.writeFile(workbook, `네이버_쇼핑검색광고_월간리포트RAW_${new Date().toISOString().slice(0, 10)}.xlsx`);
   });
 
   const themeToggle = el("themeToggle");
