@@ -995,3 +995,37 @@ tbody tr.placeholder-row td {
   background: var(--surface-1);
   color: var(--text-primary);
 }
+
+.keyword-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* 전체 / 전환매출 발생 / 미발생 토글 */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--baseline);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.segmented button {
+  border: none;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.segmented button + button {
+  border-left: 1px solid var(--baseline);
+}
+
+.segmented button.active {
+  background: var(--series-1);
+  color: #fff;
+}

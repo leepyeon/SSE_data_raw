@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>쿠팡 · 네이버 광고 리포트</title>
-<link rel="stylesheet" href="assets/style.css?v=12" />
+<link rel="stylesheet" href="assets/style.css?v=13" />
 </head>
 <body class="locked">
 <div class="lock-screen" id="lockScreen">
@@ -144,9 +144,16 @@
       <div class="card platform-only" data-platform="coupang" id="keywordCard">
         <div class="keyword-head">
           <h2>캠페인별 월간 상위 20개 키워드</h2>
-          <select id="keywordCampaignSelect" aria-label="캠페인 선택"></select>
+          <div class="keyword-controls">
+            <div class="segmented" id="keywordRevenueFilter" role="group" aria-label="전환매출 필터">
+              <button type="button" data-filter="all" class="active">전체</button>
+              <button type="button" data-filter="sold">전환매출 발생</button>
+              <button type="button" data-filter="unsold">전환매출 미발생</button>
+            </div>
+            <select id="keywordCampaignSelect" aria-label="캠페인 선택"></select>
+          </div>
         </div>
-        <div class="card-note">캠페인·월마다 광고비 상위 20개 키워드만 담아 둔 데이터입니다(PA). 월 단위라 주차 필터는 적용되지 않습니다.</div>
+        <div class="card-note">캠페인·월마다 광고비 상위 키워드(전환매출 발생·미발생 각각 20개)를 담아 둔 데이터입니다(PA). 월 단위라 주차 필터는 적용되지 않습니다.</div>
         <div class="table-scroll">
           <table>
             <thead id="keywordHead"></thead>
@@ -196,6 +203,6 @@
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <!-- app.js를 바꿀 때마다 아래 v= 숫자를 올려서, 예전 파일이 브라우저에 캐시되어 남아있는 문제를 방지합니다. -->
-<script src="assets/app.js?v=38"></script>
+<script src="assets/app.js?v=39"></script>
 </body>
 </html>

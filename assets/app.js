@@ -36,9 +36,9 @@
       // "광고명"이 그 역할이라 NCA는 광고명 값을 광고집행 상품명으로 쓴다
       // (리포트RAW의 CE_RAW/MX_RAW/쿠팡_전환상품_RAW "광고집행 상품명" 칸).
       execProductName: ["광고집행 상품명", "광고명"],
-      // 노출 지면(검색 영역/비검색 영역/외부 채널) - PA는 "광고 노출 지면",
-      // NCA는 "노출 영역". 광고 상품별 데이터 표의 노출 지면별 성과용.
-      placement: ["광고 노출 지면", "노출 영역"],
+      // 노출 지면(검색 영역/비검색 영역/외부 채널) - 광고 상품별 데이터 표의
+      // 노출 지면별 성과용. PA의 "광고 노출 지면"만 쓴다(NCA는 지면을 나누지 않음).
+      placement: "광고 노출 지면",
       keyword: "키워드",
       // NCA 세부품목 보정(의류케어 기획전 캠페인의 세탁기/건조기 구분)용.
       adName: "광고명",
@@ -185,6 +185,7 @@
     // 캠페인별 월간 상위 20개 키워드(Actions가 만든 keywordCache). null이면 아직 로딩 중.
     keywordRows: null,
     keywordCampaign: null, // 키워드 표에서 고른 캠페인 ID
+    keywordRevenueFilter: "all", // 키워드 표: all / sold(전환매출 발생) / unsold(미발생)
     table1Page: 1,
     // 슬라이서 선택 상태 - 플랫폼(탭)마다 따로 기억한다(탭을 바꿔도 유지됨).
     filters: {
@@ -1633,13 +1634,19 @@
       accumulateRow(groups, kw, { keyword: kw, noKeyword: kw === NO_KEYWORD }, r, r.__filePath, platform);
     }
     const all = finalizeGroups(groups);
+    // 표 안의 전환매출 필터: 발생(전환매출 > 0) / 미발생(0)
+    const rf = state.keywordRevenueFilter;
+    const passRevenue = (r) => rf === "all" || (rf === "sold" ? (r.revenue || 0) > 0 : !((r.revenue || 0) > 0));
+    for (const btn of document.querySelectorAll("#keywordRevenueFilter button")) {
+      btn.classList.toggle("active", btn.dataset.filter === rf);
+    }
     // 실제 키워드만 광고비 순으로 1~20위, "키워드 없음"은 순위 없이 맨 아래.
     const top = all
-      .filter((r) => !r.noKeyword)
+      .filter((r) => !r.noKeyword && passRevenue(r))
       .sort((a, b) => (b.cost || 0) - (a.cost || 0))
       .slice(0, 20)
       .map((r, i) => ({ ...r, rank: i + 1 }));
-    const noKw = all.filter((r) => r.noKeyword).map((r) => ({ ...r, rank: "-" }));
+    const noKw = rf === "all" ? all.filter((r) => r.noKeyword).map((r) => ({ ...r, rank: "-" })) : [];
     renderMetricTable(head, body, KEYWORD_COLS, [...top, ...noKw], "키워드 데이터가 없습니다.", {
       rowClass: (r) => (r.noKeyword ? "placeholder-row" : ""),
     });
@@ -1960,6 +1967,12 @@
     state.keywordCampaign = e.target.value;
     renderKeywordTable();
   });
+  for (const btn of document.querySelectorAll("#keywordRevenueFilter button")) {
+    btn.addEventListener("click", () => {
+      state.keywordRevenueFilter = btn.dataset.filter;
+      renderKeywordTable();
+    });
+  }
 
   el("filterResetBtn").addEventListener("click", () => {
     const f = state.filters[state.activePlatform];

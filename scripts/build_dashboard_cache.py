@@ -254,8 +254,8 @@ def _keyword_text(v):
 
 
 def build_keyword_cache(rows, index, meta):
-    """월+캠페인ID+캠페인명+키워드로 합친 뒤, 캠페인·월마다 광고비 상위
-    KEYWORD_TOP_N개만 남긴 키워드 캐시."""
+    """월+캠페인ID+캠페인명+키워드로 합친 뒤, 캠페인·월마다 전환매출 발생/미발생
+    키워드를 각각 광고비 상위 KEYWORD_TOP_N개만 남긴 키워드 캐시."""
     metric_cols = [c for c in METRIC_COLS if c in index]
     groups = {}
     for r in rows[1:]:
@@ -281,13 +281,18 @@ def build_keyword_cache(rows, index, meta):
     for key, acc in groups.items():
         by_campaign.setdefault(key[:3], []).append((key, acc))
     cost_i = metric_cols.index("광고비") if "광고비" in metric_cols else 0
+    rev_col = "직접 전환매출액(1일)"
+    rev_i = metric_cols.index(rev_col) if rev_col in metric_cols else cost_i
     kept = []
     for items in by_campaign.values():
         items.sort(key=lambda kv: -kv[1][cost_i])
         # 키워드가 빈 행(비검색 영역 등 검색어 없이 노출)은 순위와 별개로 항상
-        # 남기고, 실제 키워드는 상위 KEYWORD_TOP_N개를 남긴다.
+        # 남기고, 실제 키워드는 전환매출 발생/미발생 각각 광고비 상위
+        # KEYWORD_TOP_N개를 남긴다(대시보드 표의 발생/미발생 필터용).
         kept.extend([kv for kv in items if not kv[0][3]])
-        kept.extend([kv for kv in items if kv[0][3]][:KEYWORD_TOP_N])
+        real = [kv for kv in items if kv[0][3]]
+        kept.extend([kv for kv in real if kv[1][rev_i] > 0][:KEYWORD_TOP_N])
+        kept.extend([kv for kv in real if not kv[1][rev_i] > 0][:KEYWORD_TOP_N])
     columns = ["월", "캠페인 ID", "캠페인명", KEYWORD_COL]
     dicts, encode = _encode(len(columns))
     out = [encode(key) + [_metric_value(x) for x in acc] for key, acc in kept]
