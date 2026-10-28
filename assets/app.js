@@ -677,30 +677,56 @@
   // 세탁기...", "...건조기 9kg...") 그 텍스트로 세탁기/건조기를 가른다.
   // 의류케어 품목 중 아래 광고집행 상품은 세부품목을 상품 단위로 다시 나눈다
   // (캠페인/VIID 기준 INDEX만으로는 세탁기/건조기/세건패키지를 못 가른다).
-  // 상품명 전체가 같거나, 상품명 다음 칸의 모델코드가 같으면 해당 세부품목.
+  // 상품명 전체가 같거나, 상품명 뒤 칸의 모델코드가 같으면 해당 세부품목.
   const LAUNDRY_SUBITEM_PRODUCTS = {
     세탁기: [
       "삼성전자 그랑데 드럼세탁기 21kg 방문설치,WF21T6000KV,WF21T6000KV,블랙 케비어,블랙 케비어",
       "삼성전자 그랑데 드럼 세탁기 19kg 방문설치,WF19T6000KW,WF19T6000KW,화이트,화이트",
       "삼성전자 그랑데 통버블 세탁기 16kg 방문설치,WA16CG6441BY,WA16CG6441BY,라벤더그레이,라벤더그레이",
+      "삼성전자 그랑데 통버블 세탁기 10kg 방문설치,WA10CG5441BW,WA10CG5441BW,화이트,화이트",
+      "삼성전자 그랑데 통버블 세탁기 21kg 방문설치,WA21A8376KV,WA21A8376KV,블랙 케비어,블랙 케비어",
+      "삼성전자 AI 세탁기 25kg 방문설치,WF25DG8250BV,WF25DG8250BV,블랙캐비어,블랙캐비어",
+      "삼성전자 AI 세탁기 25kg 방문설치,WF25DG8250BW,WF25DG8250BW,화이트,화이트",
+      "삼성전자 AI 통버블 일반 세탁기 19kg 방문설치,WA80F19E8W,WA80F19E8W,화이트,화이트",
+      "삼성전자 그랑데 AI 세탁기 12kg 방문설치,WW12T504DTW,WW12T504DTW,화이트,화이트",
     ],
     건조기: [
       "삼성전자 AI 건조기 21kg 방문설치,DV21DG8200BV,DV21DG8200BV,블랙캐비어,블랙캐비어",
+      "삼성전자 AI 건조기 21kg 방문설치,DV21DG8200BW,DV21DG8200BW,화이트,화이트",
+      "삼성전자 건조기 9kg 방문설치,DV90TA040TE,DV90TA040TE,화이트,화이트",
+      "삼성전자 인버터 건조기 9kg 방문설치,DV90T5540BV,DV90T5540BV,블랙케비어,블랙케비어",
     ],
     세건패키지: [
       "삼성전자 BESPOKE 그랑데 AI 원바디 Top Fit 세탁기 + 건조기 WF2420HCWWC 24kg + 20kg 방문설치,WF2420HCWWC,WF2420HCWWC,화이트,화이트",
       "삼성전자 BESPOKE 그랑데 AI 원바디 Top Fit 세탁기 + 건조기 WF2420HCVVC 24kg+20kg 방문설치,WF2420HCVVC,WF2420HCVVC,블랙캐비어,블랙캐비어",
       "삼성전자 비스포크 그랑데 AI 세탁기 WF21CB6650BW + 건조기 DV17CB6600BW 21kg + 17kg 방문설치,WF21CB6650BW(세탁기) + DV17CB6600BW(건조기),WF21CB6650BW(세탁기) + DV17CB6600BW(건조기),화이트,화이트",
       "삼성전자 AI 세탁기 WF25DG8250BW + 건조기 DV21DG8200BW 25kg + 21kg + 직렬설치키트 SKK-ATW 세트 방문설치,WF25DG8250BW2T,WF25DG8250BW2T,화이트,화이트",
+      "삼성전자 AI 세탁기 WF25DG8250BV + 건조기 DV21DG8200BV 25kg + 21kg + 직렬설치키트 SKK-ATV 세트 방문설치,WF25DG8250BV2T,WF25DG8250BV2T,블랙캐비어,블랙캐비어",
+      "삼성전자 Bespoke AI 콤보 LCD 드럼 세탁건조기 25kg / 18kg 71.1mm 방문설치,화이트,화이트,WD80H25BHW,WD80H25BHW",
+      "삼성전자 Bespoke AI 콤보 LCD 드럼 세탁건조기 25kg / 20kg 177.8mm 방문설치,그레이지,그레이지,WD90H25BHY,WD90H25BHY",
+      "삼성전자 Bespoke AI 콤보 LCD 드럼 세탁건조기 25kg / 20kg 177.8mm 방문설치,화이트,화이트,WD90H25BHW,WD90H25BHW",
+    ],
+    에어드레서: [
+      "삼성전자 Bespoke 에어드레서 일반용량 상의 3~5벌 + 하의 1벌 DF18CB8600ER 방문설치,DF18CB8600ER,DF18CB8600ER,새틴 베이지,새틴 베이지",
     ],
   };
   const normalizeProductText = (v) => String(v ?? "").replace(/\s+/g, "").toUpperCase();
+  // 상품명 뒤 칸들 중 모델코드처럼 생긴 값(영문+숫자, 한글 없음)만 모델 기준
+  // 매칭에 쓴다. 콤보 세탁건조기처럼 상품명 다음 칸이 색상("화이트")인
+  // 상품도 있어서, 색상끼리 잘못 매칭되지 않게 하기 위함.
+  function productModelCodes(name) {
+    return String(name ?? "")
+      .split(",")
+      .slice(1)
+      .map(normalizeProductText)
+      .filter((c) => /[A-Z]/.test(c) && /\d/.test(c) && !/[가-힣]/.test(c));
+  }
   const LAUNDRY_SUBITEM_BY_NAME = new Map();
   const LAUNDRY_SUBITEM_BY_MODEL = new Map();
   for (const [subItem, names] of Object.entries(LAUNDRY_SUBITEM_PRODUCTS)) {
     for (const name of names) {
       LAUNDRY_SUBITEM_BY_NAME.set(normalizeProductText(name), subItem);
-      LAUNDRY_SUBITEM_BY_MODEL.set(normalizeProductText(name.split(",")[1]), subItem);
+      for (const code of productModelCodes(name)) LAUNDRY_SUBITEM_BY_MODEL.set(code, subItem);
     }
   }
   function laundrySubItemByProduct(execProductName) {
@@ -708,8 +734,11 @@
     if (!s) return null;
     const byName = LAUNDRY_SUBITEM_BY_NAME.get(normalizeProductText(s));
     if (byName) return byName;
-    const model = s.split(",")[1];
-    return model ? LAUNDRY_SUBITEM_BY_MODEL.get(normalizeProductText(model)) || null : null;
+    for (const code of productModelCodes(s)) {
+      const byModel = LAUNDRY_SUBITEM_BY_MODEL.get(code);
+      if (byModel) return byModel;
+    }
+    return null;
   }
 
   function refineNcaLaundrySubItem(adName) {
