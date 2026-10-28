@@ -14,6 +14,18 @@
     },
     {
       "platform": "coupang",
+      "name": "A00534677_pa_daily_keyword_CE_PA_20261001_20261027.xlsb",
+      "path": "data/coupang/A00534677_pa_daily_keyword_CE_PA_20261001_20261027.xlsb",
+      "size": 8550238
+    },
+    {
+      "platform": "coupang",
+      "name": "A00534677_pa_daily_keyword_MX_PA_20261001_20261027.xlsb",
+      "path": "data/coupang/A00534677_pa_daily_keyword_MX_PA_20261001_20261027.xlsb",
+      "size": 1944342
+    },
+    {
+      "platform": "coupang",
       "name": "A01703872_pa_daily_keyword_하만_PA_20261001_20261027.xlsx",
       "path": "data/coupang/A01703872_pa_daily_keyword_하만_PA_20261001_20261027.xlsx",
       "size": 769618
@@ -53,6 +65,11 @@
       "name": "INDEX_260929_수정.xlsb",
       "path": "INDEX/INDEX_260929_수정.xlsb",
       "size": 107092
+    },
+    {
+      "name": "INDEX_261028.xlsx",
+      "path": "INDEX/INDEX_261028.xlsx",
+      "size": 25443
     }
   ],
   "reportFormFiles": [

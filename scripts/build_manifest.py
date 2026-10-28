@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""data/ 폴더 안의 csv/xlsx 파일 목록을 data/manifest.json 으로 만든다.
+"""data/ 폴더 안의 csv/xlsx/xlsb 파일 목록을 data/manifest.json 으로 만든다.
 
 리포트 웹페이지(index.html)는 정적 파일이라 폴더 목록을 직접 읽을 수 없기
 때문에, 이 스크립트가 만든 manifest.json 을 보고 어떤 파일이 있는지 안다.
-data/coupang, data/naver 에 csv/xlsx 를 새로 올릴 때마다 GitHub Actions
+data/coupang, data/naver 에 csv/xlsx/xlsb 를 새로 올릴 때마다 GitHub Actions
 (.github/workflows/update-manifest.yml) 가 이 스크립트를 자동으로 실행한다.
 """
 import json
@@ -14,7 +14,7 @@ DATA_DIR = ROOT / "data"
 INDEX_DIR = ROOT / "INDEX"
 REPORT_FORM_DIR = ROOT / "리포트양식"
 PLATFORMS = ["coupang", "naver"]
-PATTERNS = ["*.csv", "*.xlsx", "*.xls"]
+PATTERNS = ["*.csv", "*.xlsx", "*.xls", "*.xlsb"]
 INDEX_PATTERNS = ["*.xlsb", "*.xlsx", "*.xls"]
 REPORT_FORM_PATTERNS = ["*.xlsb", "*.xlsx", "*.xls"]
 
