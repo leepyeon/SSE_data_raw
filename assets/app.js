@@ -58,7 +58,7 @@
       clicks: "클릭수",
       conversions: "구매완료 수",
       revenue: "구매완료 전환매출액",
-      // GFA리포트RAW 다운로드(네이버_GFA_RAW_양식.xlsb)용. 쇼핑검색광고(카탈로그)는
+      // GFA RAW 다운로드(네이버_GFA_RAW_양식.xlsb)용. 쇼핑검색광고(카탈로그)는
       // 캠페인ID/상품ID 자체가 없어서 둘 다 안 잡히고, 카탈로그는 캠페인ID만 있다.
       campaignId: "캠페인 ID",
       shoppingProductId: "쇼핑몰 상품 ID",
@@ -166,7 +166,7 @@
     // 합쳐서(fetchAllDataRows/aggregateKeywordRows) 원본 키워드별 행 자체를
     // 메모리에 남기지 않는다 - 모바일처럼 메모리가 적은 기기에서 수십만
     // 행짜리 원본을 계속 들고 있으면 무한로딩/탭 다운으로 이어질 수
-    // 있어서다. "리포트RAW 다운받기"처럼 키워드 단위가 꼭 필요한 다운로드는
+    // 있어서다. "쿠팡 상품광고 RAW 다운받기"처럼 키워드 단위가 꼭 필요한 다운로드는
     // 클릭했을 때 그 파일들만 따로 다시 받아서(withFullCoupangRows)
     // 처리한다.
     rows: [],
@@ -1143,7 +1143,7 @@
     return perFileRows.flat();
   }
 
-  // "리포트RAW 다운받기"의 CE_RAW/MX_RAW(키워드별 1:1)와 쿠팡 키워드_RAW는
+  // "쿠팡 상품광고 RAW 다운받기"의 CE_RAW/MX_RAW(키워드별 1:1)와 쿠팡 키워드_RAW는
   // 키워드 단위가 꼭 필요해서, 평소 표1~4가 쓰는 가벼운 state.rows가 아니라
   // 클릭했을 때만 쿠팡 파일들의 다운로드용 캐시(키워드를 합치지 않은 것)를
   // 받아서 build(rows)에 넘긴다. 그동안 state.colsByFile은 다운로드용 행의
@@ -1334,7 +1334,7 @@
     for (const btn of document.querySelectorAll(".tab-btn")) {
       btn.classList.toggle("active", btn.dataset.platform === state.activePlatform);
     }
-    // 플랫폼별 전용 버튼(쿠팡 "리포트RAW 다운받기", 네이버 "GFA RAW 다운받기")은
+    // 플랫폼별 전용 버튼(쿠팡 "쿠팡 상품광고 RAW 다운받기", 네이버 "GFA RAW 다운받기")은
     // 현재 탭에 맞는 것만 보여준다.
     for (const btn of document.querySelectorAll(".platform-only")) {
       btn.style.display = btn.dataset.platform === state.activePlatform ? "" : "none";
@@ -2670,7 +2670,7 @@
     }
   });
 
-  // ---------- GFA리포트RAW 다운로드 (네이버 GFA_캠페인RAW/GFA_상품RAW 양식) ----------
+  // ---------- GFA RAW 다운로드 (네이버 GFA_캠페인RAW/GFA_상품RAW 양식) ----------
   // "리포트양식/네이버_GFA_RAW_양식.xlsb"의 두 시트와 같은 컬럼 구성. 품목명은
   // 그 양식 안의 캠페인ID/상품코드 -> 품목구분 조회표(월 단위로 재사용되는
   // 경우가 있어 월+ID로 조회, loadGfaIndexMaps/buildGfaIndexMaps 참고)로
