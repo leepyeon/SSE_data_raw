@@ -132,17 +132,11 @@
     { key: "roas", label: "ROAS", format: "pct0" },
   ];
 
-  // 표1: 쿠팡은 INDEX/ 품목 분류 파일로 캠페인&그룹, 상품구분 대신 품목
-  // 기준으로만 묶는다(상품구분이 달라도 같은 품목이면 하나로 합산).
-  // 네이버는 품목 분류 데이터가 없으니 기존처럼 상품구분+캠페인명/그룹명 기준.
-  const TABLE1_COLS_COUPANG = [{ key: "itemCategory", label: "품목" }, ...METRIC_COLUMNS];
-  const TABLE1_COLS_NAVER = [
-    { key: "productType", label: "상품구분" },
-    { key: "campaign", label: "캠페인명" },
-    ...METRIC_COLUMNS,
-  ];
-  function table1ColsFor(platform) {
-    return platform === "coupang" ? TABLE1_COLS_COUPANG : TABLE1_COLS_NAVER;
+  // 품목별 데이터: 쿠팡/네이버 모두 INDEX/ 품목 분류 파일로 찾은 품목 기준으로만
+  // 묶는다(상품구분이 달라도 같은 품목이면 하나로 합산).
+  const TABLE1_COLS = [{ key: "itemCategory", label: "품목" }, ...METRIC_COLUMNS];
+  function table1ColsFor() {
+    return TABLE1_COLS;
   }
   const TABLE2_COLS = [{ key: "productType", label: "상품구분" }, { key: "placement", label: "노출 지면" }, ...METRIC_COLUMNS];
   const MONTH_COLS = [{ key: "monthLabel", label: "월" }, ...METRIC_COLUMNS];
@@ -151,15 +145,13 @@
     { key: "weekLabel", label: "주차" },
     ...METRIC_COLUMNS,
   ];
-  // 상품명은 30자까지만 보여주고(넘으면 "…", 마우스를 올리면 전체 이름),
-  // 쿠팡은 상품의 VIID(옵션ID)도 함께 보여준다.
+  // 판매 우수 상품 TOP 10: 쿠팡은 상품명, 네이버는 모델명. 30자까지만 보여주고
+  // (넘으면 "…", 마우스를 올리면 전체 이름) 상품구분/VIID 컬럼은 두지 않는다.
   const PRODUCT_NAME_MAX = 30;
   function table4ColsFor(platform) {
     return [
       { key: "rank", label: "순위" },
-      { key: "productType", label: "상품구분" },
-      { key: "productName", label: "상품명", maxLen: PRODUCT_NAME_MAX },
-      ...(platform === "coupang" ? [{ key: "viid", label: "VIID" }] : []),
+      { key: "productName", label: platform === "naver" ? "모델명" : "상품명", maxLen: PRODUCT_NAME_MAX },
       ...METRIC_COLUMNS,
     ];
   }
@@ -181,6 +173,7 @@
     colsByFile: new Map(), // filePath -> Set(원본 컬럼명)
     indexMaps: null, // INDEX/ 품목 분류 파일에서 만든 조회용 맵 (쿠팡 전용)
     gfaIndexMaps: null, // 리포트양식/ GFA 양식 파일의 품목 조회용 맵 (네이버 전용)
+    naverIndexMaps: null, // INDEX 파일 네이버_GFA/네이버_쇼핑검색광고 시트 조회용 맵
     activePlatform: "coupang",
     // 캠페인별 월간 상위 20개 키워드(Actions가 만든 keywordCache). null이면 아직 로딩 중.
     keywordRows: null,
@@ -489,7 +482,7 @@
         weeks: weekKeyOf(date),
         divisions: division,
         productTypes: row.__productType,
-        itemCategories: platform === "coupang" ? item : null,
+        itemCategories: item || null,
         subItems: platform === "coupang" ? subItem : null,
       };
       if (platform === "coupang" && f.itemCategories.has(item) && subItem) subItemsOfSelected.add(subItem);
@@ -548,6 +541,8 @@
   // promise를 기다려서 INDEX가 아직 안 끝났을 때 생기는 미분류 오류를
   // 막는다. loadManifest()가 매번 새로 할당한다.
   let indexMapsReadyPromise = null;
+  // 네이버 분류의 보조 조회표(리포트양식 GFA 양식)도 분류 직전에 기다린다.
+  let gfaMapsReadyPromise = null;
 
   // platform의 field(날짜/캠페인/그룹/광고비 등)가 filePath 안에서 어떤 실제 컬럼명인지 찾는다.
   function resolveField(filePath, platform, field) {
@@ -685,12 +680,77 @@
     try {
       const buf = await fetchArrayBuffer(latest.path);
       const workbook = XLSX.read(new Uint8Array(buf), { type: "array" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      // 쿠팡: "쿠팡상품광고" 시트(없으면 예전 파일처럼 첫 시트)
+      const sheet = workbook.Sheets["쿠팡상품광고"] || workbook.Sheets[workbook.SheetNames[0]];
       state.indexMaps = buildIndexMaps(sheet);
+      state.naverIndexMaps = buildNaverIndexMaps(workbook);
     } catch (e) {
       console.error("품목 분류 파일을 불러오지 못했습니다:", latest.path, e);
       state.indexMaps = null;
     }
+  }
+
+  // INDEX 파일의 네이버 시트 2개를 읽는다.
+  //   네이버_GFA: 캠페인 목적 | 캠페인 ID | 캠페인명 | 품목 | SOP | 상품명
+  //     -> 캠페인 ID로 품목/모델명(상품명). 애드부스트(ADVoost 쇼핑)는 상품명이
+  //        "-"라서 모델명을 RAW의 "상품명"에서 가져온다(resolveNaverClassification).
+  //   네이버_쇼핑검색광고: 캠페인 | 광고그룹 | 품목명 | 모델명
+  //     -> 캠페인+광고그룹으로 품목/모델명.
+  function buildNaverIndexMaps(workbook) {
+    const gfaByCampaignId = new Map();
+    const shoppingByGroup = new Map();
+    const rowsOf = (name) => (workbook.Sheets[name] ? XLSX.utils.sheet_to_json(workbook.Sheets[name], { defval: "" }) : []);
+    const text = (v) => String(v ?? "").trim();
+    for (const r of rowsOf("네이버_GFA")) {
+      const cid = normalizeId(r["캠페인 ID"]);
+      const item = text(r["품목"]);
+      if (cid && item) gfaByCampaignId.set(cid, { item, model: text(r["상품명"]), sop: text(r["SOP"]) });
+    }
+    for (const r of rowsOf("네이버_쇼핑검색광고")) {
+      const key = `${text(r["캠페인"])}\u0001${text(r["광고그룹"])}`;
+      const item = text(r["품목명"]);
+      if (item) shoppingByGroup.set(key, { item, model: text(r["모델명"]) });
+    }
+    return { gfaByCampaignId, shoppingByGroup };
+  }
+
+  // 네이버 raw 한 행의 품목/모델명.
+  //   GFA(캠페인 ID가 있는 애드부스트/카탈로그): INDEX 네이버_GFA(캠페인 ID) ->
+  //     없으면 리포트양식 GFA 조회표(월+캠페인 ID, 애드부스트는 월+상품 ID)로 품목.
+  //     모델명은 INDEX 상품명, 그 값이 "-"이거나 없으면 RAW "상품명"(애드부스트).
+  //   쇼핑검색광고: INDEX 네이버_쇼핑검색광고(캠페인+광고그룹).
+  //   못 찾으면 품목 "미분류", 모델명은 "미분류 · 캠페인명"(인덱스에 추가할
+  //   캠페인을 바로 알 수 있게).
+  function resolveNaverClassification(row, fp, productType) {
+    const maps = state.naverIndexMaps;
+    const platform = "naver";
+    const campaignCol = resolveField(fp, platform, "campaign");
+    const campaign = campaignCol ? String(row[campaignCol] ?? "").trim() : "";
+    const cidCol = resolveField(fp, platform, "campaignId");
+    if (cidCol) {
+      const cid = normalizeId(row[cidCol]);
+      const hit = maps ? maps.gfaByCampaignId.get(cid) : null;
+      let item = hit ? hit.item : "";
+      if (!item && row.__date) {
+        const month = String(Number(monthOf(row.__date)));
+        const byCampaign = resolveGfaCampaignItem(month, cid);
+        if (byCampaign !== "미분류") item = byCampaign;
+        const productIdCol = resolveField(fp, platform, "shoppingProductId");
+        if (!item && productIdCol) {
+          const byProduct = resolveGfaProductItem(month, row[productIdCol]);
+          if (byProduct.item !== "미분류") item = byProduct.item;
+        }
+      }
+      const rawName = String(row["상품명"] ?? "").trim();
+      const indexModel = hit && hit.model && hit.model !== "-" ? hit.model : "";
+      const model = indexModel || rawName || (item ? "-" : `미분류 · ${campaign || cid}`);
+      return { item: item || "미분류", model };
+    }
+    const groupCol = resolveField(fp, platform, "group");
+    const group = groupCol ? String(row[groupCol] ?? "").trim() : "";
+    const hit = maps ? maps.shoppingByGroup.get(`${campaign}\u0001${group}`) : null;
+    if (hit) return { item: hit.item, model: hit.model || group || "-" };
+    return { item: "미분류", model: group ? `미분류 · ${group}` : `미분류 · ${campaign}` };
   }
 
   // 네이버 GFA 양식(리포트양식/ 폴더) 안에 있는 캠페인ID/상품코드 -> 품목구분
@@ -914,7 +974,8 @@
     const banner = el("loadingBanner");
     try {
       indexMapsReadyPromise = loadIndexMaps();
-      const [, , allRows] = await Promise.all([indexMapsReadyPromise, loadGfaIndexMaps(), fetchAllDataRows()]);
+      gfaMapsReadyPromise = loadGfaIndexMaps();
+      const [, , allRows] = await Promise.all([indexMapsReadyPromise, gfaMapsReadyPromise, fetchAllDataRows()]);
       state.rows = allRows;
       renderAll();
       if (banner) banner.hidden = true;
@@ -1029,7 +1090,8 @@
     // 품목 분류는 INDEX 조회표가 준비돼야 한다. raw 파일 fetch가 INDEX
     // fetch보다 먼저 끝나는 경우(특히 withFullCoupangRows처럼 이미 로드된
     // 뒤에 다시 부를 때는 즉시 반환됨)를 대비해 분류 직전에 기다린다.
-    if (f.platform === "coupang" && indexMapsReadyPromise) await indexMapsReadyPromise;
+    if (indexMapsReadyPromise) await indexMapsReadyPromise;
+    if (f.platform === "naver" && gfaMapsReadyPromise) await gfaMapsReadyPromise;
     // 방금 읽은 행 객체를 복사하지 않고 그대로 태그를 붙인다(수십만 행을
     // 복사하면 메모리가 두 배로 든다).
     const tagged = rows;
@@ -1044,8 +1106,10 @@
         out.__item = cls.item;
         out.__subItem = cls.subItem;
       } else {
-        out.__item = null;
+        const cls = resolveNaverClassification(out, f.path, productType);
+        out.__item = cls.item;
         out.__subItem = null;
+        out.__model = cls.model;
       }
     }
     if (aggregateKeywords && f.platform === "coupang") {
@@ -1159,22 +1223,10 @@
       const productType = row.__productType;
       const itemCategory = row.__item;
       if (!date || !passesFilters(platform, date, productType, itemCategory, row.__subItem)) continue;
-      if (platform === "coupang") {
-        accumulateRow(groups, itemCategory, { itemCategory }, row, fp, platform);
-      } else {
-        const campaignCol = resolveField(fp, platform, "campaign");
-        const campaign = campaignCol ? row[campaignCol] ?? "" : "";
-        const key = `${productType}\u0001${campaign}`;
-        accumulateRow(groups, key, { productType, campaign }, row, fp, platform);
-      }
+      const item = itemCategory || "미분류";
+      accumulateRow(groups, item, { itemCategory: item }, row, fp, platform);
     }
-    const result = finalizeGroups(groups);
-    if (platform === "coupang") {
-      return result.sort((a, b) => a.itemCategory.localeCompare(b.itemCategory, "ko"));
-    }
-    return result.sort(
-      (a, b) => a.productType.localeCompare(b.productType) || a.campaign.localeCompare(b.campaign, "ko")
-    );
+    return finalizeGroups(groups).sort((a, b) => a.itemCategory.localeCompare(b.itemCategory, "ko"));
   }
 
   // 표2. 상품구분 기준 전체기간 합산
@@ -1237,32 +1289,24 @@
       const productType = row.__productType;
       const itemCategory = row.__item;
       if (!date || !passesFilters(platform, date, productType, itemCategory, row.__subItem)) continue;
-      const campaignCol = resolveField(fp, platform, "campaign");
-      const groupCol = resolveField(fp, platform, "group");
-      const campaign = campaignCol ? row[campaignCol] ?? "" : "";
-      const group = groupCol ? row[groupCol] ?? "" : "";
-      const productName = resolveProductLabel(row, fp, platform, productType, campaign, group);
-      const key = `${productType}\u0001${productName}`;
-      accumulateRow(groups, key, { productType, productName, viids: new Set() }, row, fp, platform);
-      if (platform === "coupang") {
-        const viid = productViid(row, fp);
-        if (viid) groups.get(key).viids.add(viid);
+      let productName;
+      if (platform === "naver") {
+        productName = row.__model || "-";
+      } else {
+        const campaignCol = resolveField(fp, platform, "campaign");
+        const groupCol = resolveField(fp, platform, "group");
+        const campaign = campaignCol ? row[campaignCol] ?? "" : "";
+        const group = groupCol ? row[groupCol] ?? "" : "";
+        productName = resolveProductLabel(row, fp, platform, productType, campaign, group);
       }
+      // 상품구분 컬럼이 없으므로 같은 상품(모델)이면 상품구분이 달라도 한 줄로 합친다.
+      accumulateRow(groups, productName, { productName }, row, fp, platform);
     }
     const all = finalizeGroups(groups).sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
     // 원그래프의 "기타"와 비중 계산용 - 필터에 걸린 전체 상품의 매출 합계
     const totalRevenue = all.reduce((sum, r) => sum + (r.revenue || 0), 0);
-    const rows = all.slice(0, 10).map((r, i) => {
-      const ids = [...r.viids];
-      return { ...r, rank: i + 1, viid: ids.length ? ids[0] + (ids.length > 1 ? ` 외 ${ids.length - 1}` : "") : "-" };
-    });
+    const rows = all.slice(0, 10).map((r, i) => ({ ...r, rank: i + 1 }));
     return { rows, totalRevenue };
-  }
-
-  // TOP10 상품의 VIID: 광고집행 옵션ID(PA/BPA). NCA처럼 없으면 null.
-  function productViid(row, fp) {
-    const viidCol = resolveField(fp, "coupang", "viid");
-    return viidCol ? normalizeId(row[viidCol]) || null : null;
   }
 
   // ---------- 렌더링 ----------
@@ -1337,8 +1381,9 @@
     renderSlicerGroup("productTypeSlicer", options.productTypes, f.productTypes, null, av.productTypes);
     renderSlicerGroup("itemCategorySlicer", options.itemCategories, f.itemCategories, null, av.itemCategories);
     renderSlicerGroup("subItemSlicer", options.subItems, f.subItems, null, av.subItems, "품목을 고르면 상세 품목이 나옵니다");
-    // 구분/품목/상세 품목은 쿠팡 전용이라 네이버 탭에서는 줄 자체를 숨긴다.
-    for (const id of ["divisionFilterGroup", "itemFilterGroup", "subItemFilterGroup"]) {
+    // 구분(CE·MX)/상세 품목은 쿠팡 전용이라 네이버 탭에서는 줄 자체를 숨긴다
+    // (품목은 네이버도 INDEX 네이버 시트로 분류하므로 보여준다).
+    for (const id of ["divisionFilterGroup", "subItemFilterGroup"]) {
       el(id).hidden = platform !== "coupang";
     }
     const selectedCount = FILTER_DIMENSIONS.reduce((n, dim) => n + f[dim].size, 0);
@@ -1449,7 +1494,7 @@
 
   function renderTable1() {
     const rows = computeTable1(state.activePlatform);
-    el("table1Title").textContent = state.activePlatform === "coupang" ? "품목별 데이터" : "캠페인별 데이터";
+    el("table1Title").textContent = "품목별 데이터";
     const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
     state.table1Page = Math.min(Math.max(1, state.table1Page), totalPages);
     const pageRows = rows.slice((state.table1Page - 1) * PAGE_SIZE, state.table1Page * PAGE_SIZE);
@@ -2682,7 +2727,7 @@
       const campaignRaw = weeklyRawText(row, fp, platform, "campaign");
       const key = [yearOf(date), month, productType, normalizeId(campaignIdRaw), campaignRaw].join("\u0001");
       if (!groups.has(key)) {
-        groups.set(key, { year: yearOf(date), month, productType, campaignIdRaw, campaignRaw, metrics: {} });
+        groups.set(key, { year: yearOf(date), month, productType, campaignIdRaw, campaignRaw, item: row.__item || "미분류", metrics: {} });
       }
       sumGfaMetrics(row, fp, platform, groups.get(key).metrics);
     }
@@ -2690,7 +2735,7 @@
       `${g.year}년`,
       `${g.month}월`,
       g.campaignIdRaw,
-      resolveGfaCampaignItem(g.month, g.campaignIdRaw),
+      g.item,
       g.productType,
       g.campaignRaw,
       ...gfaMetricValues(g.metrics),
@@ -2716,12 +2761,12 @@
       const campaignRaw = weeklyRawText(row, fp, platform, "campaign");
       const key = [yearOf(date), month, productType, campaignRaw, normalizeId(productIdRaw)].join("\u0001");
       if (!groups.has(key)) {
-        groups.set(key, { year: yearOf(date), month, productType, campaignRaw, productIdRaw, metrics: {} });
+        groups.set(key, { year: yearOf(date), month, productType, campaignRaw, productIdRaw, item: row.__item || "미분류", modelName: row.__model || "-", metrics: {} });
       }
       sumGfaMetrics(row, fp, platform, groups.get(key).metrics);
     }
     return [...groups.values()].map((g) => {
-      const { item, modelName } = resolveGfaProductItem(g.month, g.productIdRaw);
+      const { item, modelName } = g;
       return [
         `${g.year}년`,
         `${g.month}월`,
@@ -2754,18 +2799,14 @@
   // ---------- 쇼핑검색광고(카탈로그형) RAW 다운로드 ----------
   // "리포트양식/네이버_쇼핑검색광고_월간리포트양식RAW.xlsb"의 네이버_RAW/네이버
   // 키워드_RAW 시트와 같은 모양으로 만든다.
-  //   - 네이버_RAW의 "품목명"/"모델명"은 쇼핑검색광고(카탈로그) raw에 상품/모델
-  //     컬럼이 없고, 캠페인/광고그룹명 표기 방식이 캠페인마다 달라서(자동
-  //     생성된 "CN~/FF~" 코드형, 수동으로 "쇼핑검색_<품목>"처럼 지은 이름형)
-  //     추측으로 채우면 사업부 집계가 틀릴 위험이 있어 일단 비워두고, 대신
-  //     대시보드 표1(캠페인명/그룹명 기준)과 맞춰볼 수 있게 "참고_캠페인"/
-  //     "참고_광고그룹" 2개 컬럼을 뒤에 추가해서 수동으로 채울 수 있게 한다.
+  //   - 네이버_RAW의 "품목명"/"모델명"은 INDEX 파일 "네이버_쇼핑검색광고" 시트
+  //     (캠페인+광고그룹 -> 품목명/모델명)로 채운다. INDEX에 없는 광고그룹은
+  //     비워두고, 뒤의 "참고_캠페인"/"참고_광고그룹"으로 확인할 수 있다.
   //   - 네이버 키워드_RAW는 별도로 올라온 "...쇼핑검색광고_검색어_RAW_..."
   //     리포트(캠페인유형/캠페인/광고그룹/PC-모바일매체/검색어/노출수/클릭수/
   //     총비용, 날짜 컬럼은 없고 파일명에만 날짜 범위가 있음)에서 가져온다.
-  //     "모델명"은 이 리포트의 광고그룹 값이 이미 상품 모델코드라 그대로
-  //     옮기고, "품목"은 역시 분류 판단이 필요해 비워둔다(모델명으로 대시보드
-  //     와 맞춰보고 수동으로 채울 수 있다).
+  //     "품목"/"모델명"도 같은 INDEX 시트로 채우고, INDEX에 없으면 광고그룹
+  //     값을 모델명으로 두고 품목은 비운다.
   const NAVER_SHOPPING_RAW_HEADER = [
     "년도", "집행월", "품목명", "모델명", "PC/MO", "시간대",
     "노출수", "클릭수", "총비용(VAT포함,원)", "평균노출순위",
@@ -2804,6 +2845,8 @@
       if (!groups.has(key)) {
         groups.set(key, {
           year: yearOf(date), month, campaignRaw, groupRaw, pcMobileRaw, hourlyRaw,
+          item: row.__item && row.__item !== "미분류" ? row.__item : "",
+          model: row.__item && row.__item !== "미분류" ? row.__model || "" : "",
           impressions: 0, clicks: 0, cost: 0, rankWeighted: 0, rankWeight: 0,
         });
       }
@@ -2821,8 +2864,8 @@
     return [...groups.values()].map((g) => [
       `${g.year}년`,
       `${g.month}월`,
-      "",
-      "",
+      g.item,
+      g.model,
       g.pcMobileRaw,
       g.hourlyRaw,
       g.impressions,
@@ -2853,9 +2896,14 @@
       const keywordRaw = row[keywordCol] ?? "-";
       const modelRaw = groupCol ? (row[groupCol] ?? "-") : "-";
       const month = String(Number(monthOf(date)));
-      const key = [yearOf(date), month, modelRaw, keywordRaw].join("\u0001");
+      // 모델명/품목은 INDEX 네이버_쇼핑검색광고(캠페인+광고그룹) 값, 없으면
+      // 예전처럼 광고그룹 값을 모델명으로 두고 품목은 비운다.
+      const classified = row.__item && row.__item !== "미분류";
+      const model = classified ? row.__model || modelRaw : modelRaw;
+      const item = classified ? row.__item : "";
+      const key = [yearOf(date), month, model, keywordRaw].join("\u0001");
       if (!groups.has(key)) {
-        groups.set(key, { year: yearOf(date), month, modelRaw, keywordRaw, impressions: 0, clicks: 0, cost: 0 });
+        groups.set(key, { year: yearOf(date), month, modelRaw: model, item, keywordRaw, impressions: 0, clicks: 0, cost: 0 });
       }
       const g = groups.get(key);
       g.impressions += parseNumberLoose(row[impressionsCol]) || 0;
@@ -2865,7 +2913,7 @@
     return [...groups.values()].map((g) => [
       `${g.year}년`,
       `${g.month}월`,
-      "",
+      g.item,
       g.modelRaw,
       g.keywordRaw,
       g.impressions,
