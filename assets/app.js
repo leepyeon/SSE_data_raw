@@ -717,7 +717,8 @@
   // 네이버 raw 한 행의 품목/모델명.
   //   GFA(캠페인 ID가 있는 애드부스트/카탈로그): INDEX 네이버_GFA(캠페인 ID) ->
   //     없으면 리포트양식 GFA 조회표(월+캠페인 ID, 애드부스트는 월+상품 ID)로 품목.
-  //     모델명은 INDEX 상품명, 그 값이 "-"이거나 없으면 RAW "상품명"(애드부스트).
+  //     모델명: 카탈로그는 "카탈로그_SOP명"(INDEX SOP), 그 외는 INDEX 상품명,
+  //     그 값이 "-"이거나 없으면 RAW "상품명"(애드부스트).
   //   쇼핑검색광고: INDEX 네이버_쇼핑검색광고(캠페인+광고그룹).
   //   못 찾으면 품목 "미분류", 모델명은 "미분류 · 캠페인명"(인덱스에 추가할
   //   캠페인을 바로 알 수 있게).
@@ -742,9 +743,13 @@
         }
       }
       const rawName = String(row["상품명"] ?? "").trim();
+      const sop = hit && hit.sop && hit.sop !== "-" ? hit.sop : "";
+      // 카탈로그는 GFA 주간리포트 양식 안내대로 모델명을 "카탈로그_SOP명"(예:
+      // 카탈로그_유니씨앤씨)으로 통일한다. INDEX 상품명(카탈로그_유니 등)보다 우선.
+      const catalogModel = productType === "카탈로그" && sop ? `카탈로그_${sop}` : "";
       const indexModel = hit && hit.model && hit.model !== "-" ? hit.model : "";
-      const model = indexModel || rawName || (item ? "-" : `미분류 · ${campaign || cid}`);
-      return { item: item || "미분류", model, sop: hit && hit.sop && hit.sop !== "-" ? hit.sop : "" };
+      const model = catalogModel || indexModel || rawName || (item ? "-" : `미분류 · ${campaign || cid}`);
+      return { item: item || "미분류", model, sop };
     }
     const groupCol = resolveField(fp, platform, "group");
     const group = groupCol ? String(row[groupCol] ?? "").trim() : "";
