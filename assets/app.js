@@ -744,7 +744,7 @@
       const rawName = String(row["상품명"] ?? "").trim();
       const indexModel = hit && hit.model && hit.model !== "-" ? hit.model : "";
       const model = indexModel || rawName || (item ? "-" : `미분류 · ${campaign || cid}`);
-      return { item: item || "미분류", model };
+      return { item: item || "미분류", model, sop: hit && hit.sop && hit.sop !== "-" ? hit.sop : "" };
     }
     const groupCol = resolveField(fp, platform, "group");
     const group = groupCol ? String(row[groupCol] ?? "").trim() : "";
@@ -790,7 +790,7 @@
 
   async function loadGfaIndexMaps() {
     const files = (Array.isArray(state.manifest.reportFormFiles) ? state.manifest.reportFormFiles : []).filter(
-      (f) => f.name.includes("GFA")
+      (f) => f.name.includes("GFA_RAW")
     );
     if (files.length === 0) {
       state.gfaIndexMaps = null;
@@ -1110,6 +1110,7 @@
         out.__item = cls.item;
         out.__subItem = null;
         out.__model = cls.model;
+        out.__sop = cls.sop || "";
       }
     }
     if (aggregateKeywords && f.platform === "coupang") {
@@ -1328,7 +1329,7 @@
     for (const btn of document.querySelectorAll(".tab-btn")) {
       btn.classList.toggle("active", btn.dataset.platform === state.activePlatform);
     }
-    // 플랫폼별 전용 버튼(쿠팡 "리포트RAW 다운받기", 네이버 "GFA리포트RAW 다운받기")은
+    // 플랫폼별 전용 버튼(쿠팡 "리포트RAW 다운받기", 네이버 "GFA RAW 다운받기")은
     // 현재 탭에 맞는 것만 보여준다.
     for (const btn of document.querySelectorAll(".platform-only")) {
       btn.style.display = btn.dataset.platform === state.activePlatform ? "" : "none";
@@ -2645,11 +2646,11 @@
       const sheets = await withFullCoupangRows((fullRows) => {
         const { ceRows, mxRows } = buildWeeklyRawRows(fullRows);
         return [
-          { name: "CE_RAW", header: WEEKLY_RAW_HEADER, rows: ceRows },
-          { name: "MX_RAW", header: WEEKLY_RAW_HEADER, rows: mxRows },
-          { name: "쿠팡_RAW", header: MONTHLY_RAW_HEADER, rows: buildMonthlyRawRows(fullRows) },
-          { name: "쿠팡_전환상품_RAW", header: CONVERSION_PRODUCT_HEADER, rows: buildConversionProductRows(fullRows) },
-          { name: "쿠팡 키워드_RAW", header: KEYWORD_HEADER, rows: buildKeywordRows(fullRows) },
+          { name: "주간_CE_RAW", header: WEEKLY_RAW_HEADER, rows: ceRows },
+          { name: "주간_MX_RAW", header: WEEKLY_RAW_HEADER, rows: mxRows },
+          { name: "월간_쿠팡_RAW", header: MONTHLY_RAW_HEADER, rows: buildMonthlyRawRows(fullRows) },
+          { name: "월간_쿠팡_전환상품_RAW", header: CONVERSION_PRODUCT_HEADER, rows: buildConversionProductRows(fullRows) },
+          { name: "월간_쿠팡 키워드_RAW", header: KEYWORD_HEADER, rows: buildKeywordRows(fullRows) },
           // 품목별·월별 코멘트 - 숨김 시트(엑셀에서 "숨기기 취소"로 볼 수 있음)
           { name: "코멘트", header: COMMENT_HEADER, rows: buildItemCommentRows(fullRows), hidden: true },
         ];
@@ -2680,6 +2681,11 @@
     "집행 년", "집행 월", "쇼핑몰 상품 ID", "품목명", "모델명", "광고유형", "캠페인명",
     "총비용(VAT포함,원)", "노출수", "클릭수", "구매완료(1일)", "구매완료 전환매출액(1일)", "광고비(-VAT)",
   ];
+
+  // GFA RAW 파일의 "광고유형" 표기(네이버 GFA 화면/양식과 같게)
+  function gfaAdTypeLabel(productType) {
+    return productType === "애드부스트" ? "ADVoost 쇼핑" : productType;
+  }
 
   function resolveGfaCampaignItem(month, campaignIdRaw) {
     const maps = state.gfaIndexMaps;
@@ -2736,7 +2742,7 @@
       `${g.month}월`,
       g.campaignIdRaw,
       g.item,
-      g.productType,
+      gfaAdTypeLabel(g.productType),
       g.campaignRaw,
       ...gfaMetricValues(g.metrics),
       Number.isFinite(g.metrics.cost) ? Math.round(naverVatExcludedCost(g.metrics.cost) * 100) / 100 : "-",
@@ -2773,7 +2779,7 @@
         g.productIdRaw,
         item,
         modelName,
-        g.productType,
+        gfaAdTypeLabel(g.productType),
         g.campaignRaw,
         ...gfaMetricValues(g.metrics),
         Number.isFinite(g.metrics.cost) ? Math.round(naverVatExcludedCost(g.metrics.cost) * 100) / 100 : "-",
@@ -2781,19 +2787,144 @@
     });
   }
 
-  el("downloadGfaReportBtn").addEventListener("click", () => {
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(
-      workbook,
-      XLSX.utils.aoa_to_sheet([GFA_CAMPAIGN_HEADER, ...buildGfaCampaignRows()]),
-      "GFA_캠페인RAW"
+  // ---------- 주간_GFA_RAW ("리포트양식/네이버 GFA_주간리포트_양식.xlsx"의
+  // GFA_주간리포트_RAW 시트와 같은 컬럼) ----------
+  // 일별 x 캠페인 x 상품(애드부스트) 단위. 카탈로그는 상품이 없어 일별 x 캠페인.
+  //   품목: 양식 INDEX_* 시트(상품코드 -> 품목)에 있으면 그 값, 없으면 INDEX 파일
+  //         네이버_GFA 품목을 양식의 "주력품목 -> 품목"(예: 노트북 -> PC)으로 바꾼 값
+  //   SOP: INDEX 파일 네이버_GFA의 SOP
+  //   모델명: 애드부스트는 양식 INDEX_*의 상품코드 -> 모델명, 없으면 RAW 상품명.
+  //           카탈로그는 양식 안내대로 "카탈로그_SOP명"
+  //   상품코드/상품명: 애드부스트는 RAW 값, 카탈로그는 "카탈로그"
+  const GFA_WEEKLY_HEADER = [
+    "년도", "월", "주차", "일별", "품목", "SOP", "광고유형", "캠페인명", "모델명", "상품코드", "상품명",
+    "노출수", "클릭수", "총비용(VAT포함,원)", "구매전환수", "구매전환매출", "분류",
+  ];
+
+  // 양식 안의 INDEX_* 시트(월 | SOP | 광고유형 | 상품코드 | 모델명 | 품목 | 주력품목 | 분류)를 읽는다.
+  async function loadGfaWeeklyFormIndex() {
+    const files = (Array.isArray(state.manifest.reportFormFiles) ? state.manifest.reportFormFiles : []).filter(
+      (f) => f.name.includes("GFA") && f.name.includes("주간")
     );
-    XLSX.utils.book_append_sheet(
-      workbook,
-      XLSX.utils.aoa_to_sheet([GFA_PRODUCT_HEADER, ...buildGfaProductRows()]),
-      "GFA_상품RAW"
-    );
-    XLSX.writeFile(workbook, `네이버_GFA리포트RAW_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    const out = { byCode: new Map(), itemByMainItem: new Map() };
+    if (!files.length) return out;
+    try {
+      const buf = await fetchArrayBuffer(pickLatestByName(files).path);
+      const wb = XLSX.read(new Uint8Array(buf), { type: "array" });
+      const text = (v) => String(v ?? "").trim();
+      for (const name of wb.SheetNames.filter((n) => /^INDEX/i.test(n))) {
+        const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, defval: "" });
+        const h = aoa.findIndex((r) => r.some((c) => text(c) === "상품코드"));
+        if (h < 0) continue;
+        const col = (label) => aoa[h].findIndex((c) => text(c) === label);
+        const [cMonth, cCode, cModel, cItem, cMain, cClass] = ["월", "상품코드", "모델명", "품목", "주력품목", "분류"].map(col);
+        for (const r of aoa.slice(h + 1)) {
+          const code = normalizeId(r[cCode]);
+          const item = cItem >= 0 ? text(r[cItem]) : "";
+          const mainItem = cMain >= 0 ? text(r[cMain]) : "";
+          if (mainItem && item) out.itemByMainItem.set(mainItem, item);
+          if (!code) continue;
+          const v = { model: text(r[cModel]), item, mainItem, cls: cClass >= 0 ? text(r[cClass]) : "" };
+          const month = cMonth >= 0 ? text(r[cMonth]).replace(/\s+/g, "") : "";
+          out.byCode.set(`${month}\u0001${code}`, v);
+          if (!out.byCode.has(`\u0001${code}`)) out.byCode.set(`\u0001${code}`, v);
+        }
+      }
+    } catch (e) {
+      console.error("GFA 주간 양식의 INDEX를 읽지 못했습니다:", e);
+    }
+    return out;
+  }
+
+  function weekNameLabel(date) {
+    const w = weekOf(date);
+    return `${w.month}월${w.n}주차`;
+  }
+
+  function localDate(dateStr) {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    return new Date(y, m - 1, d);
+  }
+
+  function buildGfaWeeklyRows(formIndex) {
+    const platform = "naver";
+    const groups = new Map();
+    for (const row of state.rows) {
+      if (row.__platform !== platform) continue;
+      const fp = row.__filePath;
+      const campaignIdCol = resolveField(fp, platform, "campaignId");
+      if (!campaignIdCol) continue; // GFA(애드부스트/카탈로그)만
+      const date = row.__date;
+      if (!date) continue;
+      const productType = row.__productType;
+      const productIdCol = resolveField(fp, platform, "shoppingProductId");
+      const isAdvoost = productType === "애드부스트" && productIdCol;
+      const code = isAdvoost ? normalizeId(row[productIdCol]) : "";
+      const campaignRaw = weeklyRawText(row, fp, platform, "campaign");
+      const key = [date, normalizeId(row[campaignIdCol]), code].join("\u0001");
+      if (!groups.has(key)) {
+        const monthLabel = `${Number(monthOf(date))}월`;
+        const hit = code ? formIndex.byCode.get(`${monthLabel}\u0001${code}`) || formIndex.byCode.get(`\u0001${code}`) : null;
+        const item = hit && hit.item
+          ? hit.item
+          : formIndex.itemByMainItem.get(row.__item) || (row.__item && row.__item !== "미분류" ? row.__item : "");
+        const sop = row.__sop || "";
+        groups.set(key, {
+          values: [
+            `${yearOf(date)}년`, monthLabel, weekNameLabel(date), localDate(date),
+            item, sop, gfaAdTypeLabel(productType), campaignRaw,
+            isAdvoost ? (hit && hit.model) || String(row["상품명"] ?? "").trim() || "-" : `카탈로그${sop ? `_${sop}` : ""}`,
+            isAdvoost ? row[productIdCol] : "카탈로그",
+            isAdvoost ? String(row["상품명"] ?? "").trim() : "카탈로그",
+          ],
+          cls: hit ? hit.cls : "",
+          metrics: {},
+        });
+      }
+      sumGfaMetrics(row, fp, platform, groups.get(key).metrics);
+    }
+    return [...groups.values()]
+      .sort((a, b) => a.values[3] - b.values[3] || String(a.values[7]).localeCompare(String(b.values[7])))
+      .map((g) => [
+        ...g.values,
+        ...["impressions", "clicks", "cost", "conversions", "revenue"].map((f) =>
+          Number.isFinite(g.metrics[f]) ? Math.round(g.metrics[f] * 100) / 100 : 0
+        ),
+        g.cls,
+      ]);
+  }
+
+  el("downloadGfaReportBtn").addEventListener("click", async () => {
+    const btn = el("downloadGfaReportBtn");
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "GFA RAW 준비 중...";
+    try {
+      const formIndex = await loadGfaWeeklyFormIndex();
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.aoa_to_sheet([GFA_WEEKLY_HEADER, ...buildGfaWeeklyRows(formIndex)], { dateNF: "yyyy-mm-dd" }),
+        "주간_GFA_RAW"
+      );
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.aoa_to_sheet([GFA_CAMPAIGN_HEADER, ...buildGfaCampaignRows()]),
+        "월간_GFA_캠페인RAW"
+      );
+      XLSX.utils.book_append_sheet(
+        workbook,
+        XLSX.utils.aoa_to_sheet([GFA_PRODUCT_HEADER, ...buildGfaProductRows()]),
+        "월간_GFA_상품RAW"
+      );
+      XLSX.writeFile(workbook, `네이버_GFA_RAW_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch (e) {
+      console.error("GFA RAW를 만들지 못했습니다:", e);
+      alert("GFA RAW를 만드는 중 문제가 생겼습니다. 다시 시도해주세요.");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
   });
 
   // ---------- 쇼핑검색광고(카탈로그형) RAW 다운로드 ----------
@@ -2922,19 +3053,132 @@
     ]);
   }
 
+  // ---------- 쇼핑검색광고 주간 시트 ("리포트양식/네이버_쇼핑검색광고_주간리포트_양식.xlsx"
+  // 의 Raw_PC / Raw_PC_키워드 시트와 같은 컬럼) ----------
+  // 품목/모델명은 INDEX 파일 네이버_쇼핑검색광고(캠페인+광고그룹). 사업부/경로는
+  // 원본에 없어 비워둔다.
+  const NAVER_SHOPPING_WEEKLY_HEADER = [
+    "년", "월", "주차", "일별", "사업부", "품목", "모델명", "경로",
+    "PC/모바일 매체", "시간대별", "노출수", "클릭수", "총비용(VAT포함,원)", "평균노출순위",
+  ];
+  const NAVER_SHOPPING_WEEKLY_KEYWORD_HEADER = [
+    "년", "주차", "사업부", "품목", "모델명", "경로", "PC/모바일 매체", "검색어", "노출수", "클릭수", "총비용(VAT포함,원)",
+  ];
+
+  function naverShoppingClass(row, fp) {
+    const groupCol = resolveField(fp, "naver", "group");
+    const group = groupCol ? String(row[groupCol] ?? "").trim() : "";
+    const classified = row.__item && row.__item !== "미분류";
+    return { item: classified ? row.__item : "", model: classified ? row.__model || group : group };
+  }
+
+  // 일별 리포트(시간대별) -> 일별 x 품목 x 모델명 x PC/MO x 시간대
+  function buildNaverShoppingWeeklyRows() {
+    const platform = "naver";
+    const groups = new Map();
+    for (const row of state.rows) {
+      if (row.__platform !== platform) continue;
+      const fp = row.__filePath;
+      const hourlyCol = resolveField(fp, platform, "hourly");
+      const pcMobileCol = resolveField(fp, platform, "pcMobile");
+      if (!hourlyCol || !pcMobileCol) continue;
+      const date = row.__date;
+      if (!date) continue;
+      const { item, model } = naverShoppingClass(row, fp);
+      const pcMobile = row[pcMobileCol] ?? "-";
+      const hourly = row[hourlyCol] ?? "-";
+      const key = [date, item, model, pcMobile, hourly].join("\u0001");
+      if (!groups.has(key)) {
+        groups.set(key, { date, item, model, pcMobile, hourly, impressions: 0, clicks: 0, cost: 0, rankWeighted: 0, rankWeight: 0 });
+      }
+      const g = groups.get(key);
+      const impressions = parseNumberLoose(row[resolveField(fp, platform, "impressions")]) || 0;
+      g.impressions += impressions;
+      g.clicks += parseNumberLoose(row[resolveField(fp, platform, "clicks")]) || 0;
+      g.cost += parseNumberLoose(row[resolveField(fp, platform, "cost")]) || 0;
+      const rankCol = resolveField(fp, platform, "avgRank");
+      const rank = rankCol ? parseNumberLoose(row[rankCol]) : NaN;
+      if (Number.isFinite(rank)) {
+        g.rankWeighted += rank * impressions;
+        g.rankWeight += impressions;
+      }
+    }
+    return [...groups.values()]
+      .sort((a, b) => a.date.localeCompare(b.date) || a.model.localeCompare(b.model) || String(a.hourly).localeCompare(String(b.hourly)))
+      .map((g) => [
+        `${yearOf(g.date)}년`, `${Number(monthOf(g.date))}월`, weekNameLabel(g.date), localDate(g.date),
+        "", g.item, g.model, "",
+        g.pcMobile, g.hourly, g.impressions, g.clicks, g.cost,
+        g.rankWeight > 0 ? Math.round((g.rankWeighted / g.rankWeight) * 10) / 10 : "-",
+      ]);
+  }
+
+  // 검색어 리포트는 행에 날짜가 없고 파일 전체 기간(예: 월기준) 합계라 주차로
+  // 나눌 수 없다. 파일 기간이 한 주(월~일) 안이면 그 주차, 아니면 기간
+  // ("10.01~10.27")을 주차 칸에 넣는다.
+  function fileWeekLabel(fileName) {
+    const m = String(fileName || "").match(/(\d{6,8})\s*[~-]\s*(\d{6,8})/);
+    if (!m) return "-";
+    const toDate = (s) => parseDateLoose(s.length === 6 ? `20${s}` : s);
+    const a = toDate(m[1]);
+    const b = toDate(m[2]);
+    if (!a || !b) return "-";
+    if (weekKeyOf(a) === weekKeyOf(b)) return weekNameLabel(a);
+    return `${a.slice(5).replace("-", ".")}~${b.slice(5).replace("-", ".")}`;
+  }
+
+  function buildNaverShoppingWeeklyKeywordRows() {
+    const platform = "naver";
+    const groups = new Map();
+    for (const row of state.rows) {
+      if (row.__platform !== platform) continue;
+      const fp = row.__filePath;
+      const keywordCol = resolveField(fp, platform, "keyword");
+      if (!keywordCol) continue;
+      const date = parseDateFromFileName(row.__file);
+      if (!date) continue;
+      const week = fileWeekLabel(row.__file);
+      const { item, model } = naverShoppingClass(row, fp);
+      const pcMobileCol = resolveField(fp, platform, "pcMobile");
+      const pcMobile = pcMobileCol ? row[pcMobileCol] ?? "-" : "-";
+      const keyword = row[keywordCol] ?? "-";
+      const key = [yearOf(date), week, item, model, pcMobile, keyword].join("\u0001");
+      if (!groups.has(key)) {
+        groups.set(key, { year: yearOf(date), week, item, model, pcMobile, keyword, impressions: 0, clicks: 0, cost: 0 });
+      }
+      const g = groups.get(key);
+      g.impressions += parseNumberLoose(row[resolveField(fp, platform, "impressions")]) || 0;
+      g.clicks += parseNumberLoose(row[resolveField(fp, platform, "clicks")]) || 0;
+      g.cost += parseNumberLoose(row[resolveField(fp, platform, "cost")]) || 0;
+    }
+    return [...groups.values()].map((g) => [
+      `${g.year}년`, g.week, "", g.item, g.model, "", g.pcMobile, g.keyword, g.impressions, g.clicks, g.cost,
+    ]);
+  }
+
   el("downloadShoppingSearchBtn").addEventListener("click", () => {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(
       workbook,
+      XLSX.utils.aoa_to_sheet([NAVER_SHOPPING_WEEKLY_HEADER, ...buildNaverShoppingWeeklyRows()], { dateNF: "yyyy-mm-dd" }),
+      "주간_RAW"
+    );
+    XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.aoa_to_sheet([NAVER_SHOPPING_WEEKLY_KEYWORD_HEADER, ...buildNaverShoppingWeeklyKeywordRows()]),
+      "주간_키워드RAW"
+    );
+    XLSX.utils.book_append_sheet(
+      workbook,
       XLSX.utils.aoa_to_sheet([NAVER_SHOPPING_RAW_HEADER, ...buildNaverShoppingRawRows()]),
-      "네이버_RAW"
+      "월간_네이버_RAW"
     );
     XLSX.utils.book_append_sheet(
       workbook,
       XLSX.utils.aoa_to_sheet([NAVER_SHOPPING_KEYWORD_HEADER, ...buildNaverShoppingKeywordRows()]),
-      "네이버 키워드_RAW"
+      "월간_네이버 키워드_RAW"
     );
-    XLSX.writeFile(workbook, `네이버_쇼핑검색광고_월간리포트RAW_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(workbook, `네이버_쇼핑검색광고_RAW_${new Date().toISOString().slice(0, 10)}.xlsx`);
   });
 
   const themeToggle = el("themeToggle");
