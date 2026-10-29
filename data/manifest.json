@@ -41,15 +41,15 @@
     },
     {
       "platform": "naver",
-      "name": "네이버_GFA_애드부스트_261001~261027.csv",
-      "path": "data/naver/네이버_GFA_애드부스트_261001~261027.csv",
-      "size": 283716
+      "name": "네이버_GFA_애드부스트_261001~261027_v2.csv",
+      "path": "data/naver/네이버_GFA_애드부스트_261001~261027_v2.csv",
+      "size": 110094
     },
     {
       "platform": "naver",
-      "name": "네이버_GFA_카탈로그_261001~261027.csv",
-      "path": "data/naver/네이버_GFA_카탈로그_261001~261027.csv",
-      "size": 106920
+      "name": "네이버_GFA_카탈로그_261001~261027_v2.csv",
+      "path": "data/naver/네이버_GFA_카탈로그_261001~261027_v2.csv",
+      "size": 18801
     },
     {
       "platform": "naver",
