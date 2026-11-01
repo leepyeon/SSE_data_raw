@@ -41,15 +41,27 @@
     },
     {
       "platform": "naver",
-      "name": "네이버_GFA_애드부스트_261001~261027_v2.csv",
-      "path": "data/naver/네이버_GFA_애드부스트_261001~261027_v2.csv",
-      "size": 110094
+      "name": "네이버_GFA_CE_애드부스트_261001~261031.csv",
+      "path": "data/naver/네이버_GFA_CE_애드부스트_261001~261031.csv",
+      "size": 664321
     },
     {
       "platform": "naver",
-      "name": "네이버_GFA_카탈로그_261001~261027_v2.csv",
-      "path": "data/naver/네이버_GFA_카탈로그_261001~261027_v2.csv",
-      "size": 18801
+      "name": "네이버_GFA_CE_카탈로그_261001~261031.csv",
+      "path": "data/naver/네이버_GFA_CE_카탈로그_261001~261031.csv",
+      "size": 21373
+    },
+    {
+      "platform": "naver",
+      "name": "네이버_GFA_MX_애드부스트_261001~261031.csv",
+      "path": "data/naver/네이버_GFA_MX_애드부스트_261001~261031.csv",
+      "size": 134041
+    },
+    {
+      "platform": "naver",
+      "name": "네이버_GFA_MX_카탈로그_261001~261031.csv",
+      "path": "data/naver/네이버_GFA_MX_카탈로그_261001~261031.csv",
+      "size": 23222
     },
     {
       "platform": "naver",
