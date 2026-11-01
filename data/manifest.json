@@ -47,8 +47,8 @@
     },
     {
       "platform": "naver",
-      "name": "네이버_GFA_CE_카탈로그_261001~261031.csv",
-      "path": "data/naver/네이버_GFA_CE_카탈로그_261001~261031.csv",
+      "name": "네이버_GFA_CE_카탈로그_261001~261031_V2.csv",
+      "path": "data/naver/네이버_GFA_CE_카탈로그_261001~261031_V2.csv",
       "size": 36754
     },
     {
@@ -59,8 +59,8 @@
     },
     {
       "platform": "naver",
-      "name": "네이버_GFA_MX_카탈로그_261001~261031.csv",
-      "path": "data/naver/네이버_GFA_MX_카탈로그_261001~261031.csv",
+      "name": "네이버_GFA_MX_카탈로그_261001~261031_V2.csv",
+      "path": "data/naver/네이버_GFA_MX_카탈로그_261001~261031_V2.csv",
       "size": 38360
     },
     {
