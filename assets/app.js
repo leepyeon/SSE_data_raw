@@ -2206,8 +2206,8 @@
 
   // 누적파일: "리포트양식/쿠팡_누적파일RAW.xlsx" 양식. 키워드/상품을 버리고
   // 날짜+상품유형(PA/NCA)+광고유형+품목+캠페인+광고그룹 단위의 일별 합계.
-  // 원본에 청구 금액 컬럼이 없어서 "청구광고비"는 광고비(VAT 제외)에
-  // VAT 10%를 더한 금액(광고비 x 1.1)으로 채운다.
+  // "청구광고비"는 값을 채우지 않고 빈 칸으로 둔다(양식과 칼럼 자리를
+  // 맞추기 위해 칼럼만 남긴다).
   const CUMULATIVE_RAW_HEADER = [
     "년도", "월", "날짜", "구분", "상품유형", "광고유형", "품목",
     "캠페인 ID", "캠페인명", "광고그룹",
@@ -2242,23 +2242,20 @@
     const sortKey = (g) => [g.date, g.division, g.productType, g.item, String(g.campaignRaw), String(g.groupRaw)].join("\u0001");
     return [...groups.values()]
       .sort((a, b) => (sortKey(a) < sortKey(b) ? -1 : sortKey(a) > sortKey(b) ? 1 : 0))
-      .map((g) => {
-        const cost = g.metrics.cost;
-        return [
-          `${yearOf(g.date)}년`,
-          `${Number(monthOf(g.date))}월`,
-          Number(g.date.replace(/-/g, "")),
-          g.division,
-          g.productType,
-          g.adType,
-          g.item,
-          g.campaignIdRaw,
-          g.campaignRaw,
-          g.groupRaw,
-          ...weeklyMetricValues(g.metrics),
-          Number.isFinite(cost) ? Math.round(cost * 1.1) : "-",
-        ];
-      });
+      .map((g) => [
+        `${yearOf(g.date)}년`,
+        `${Number(monthOf(g.date))}월`,
+        Number(g.date.replace(/-/g, "")),
+        g.division,
+        g.productType,
+        g.adType,
+        g.item,
+        g.campaignIdRaw,
+        g.campaignRaw,
+        g.groupRaw,
+        ...weeklyMetricValues(g.metrics),
+        "",
+      ]);
   }
 
   // 쿠팡_전환상품_RAW: 월간 집계라 주차/날짜/그룹명을 버리고 집행년+집행월+
