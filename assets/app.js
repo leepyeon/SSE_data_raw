@@ -588,11 +588,16 @@
   // 파일명으로 광고상품 구분(쿠팡 PA/BPA/NCA, 네이버 쇼핑검색/애드부스트/카탈로그)을 추정한다.
   // 서로 다른 상품인데 캠페인명/그룹명이 우연히 같아도 집계가 섞이지 않도록
   // 이 값을 집계 키에 포함시킨다.
-  function detectProductType(platform, fileName) {
+  // cols(원본 컬럼 Set)를 주면, 파일명에 상품 표시가 없을 때 컬럼으로 판단한다.
+  // (예: 11월부터 NCA 리포트 파일명이 "custom_report_CE_..."로 바뀌어 "NCA"가 없음
+  //  -> NCA 리포트에만 있는 "광고명"/"소재 ID" 컬럼으로 NCA로 인식)
+  function detectProductType(platform, fileName, cols) {
     if (platform === "coupang") {
       if (/BPA/i.test(fileName)) return "BPA";
       if (/NCA/i.test(fileName)) return "NCA";
       if (/PA/i.test(fileName)) return "PA";
+      if (cols && (cols.has("광고명") || cols.has("소재 ID"))) return "NCA";
+      if (cols && cols.has("키워드")) return "PA";
       return "기타";
     }
     if (platform === "naver") {
@@ -952,9 +957,9 @@
     return unclassified;
   }
 
-  // 품목 -> 사업부(CE/MX). 웨어러블/모바일은 MX, 그 외 알려진 품목은 CE,
+  // 품목 -> 사업부(CE/MX). 웨어러블/모바일/태블릿은 MX, 그 외 알려진 품목은 CE,
   // "미분류"는 사업부를 특정할 수 없으므로 null.
-  const MX_ITEMS = new Set(["웨어러블", "모바일"]);
+  const MX_ITEMS = new Set(["웨어러블", "모바일", "태블릿"]);
   function classifyDivision(item) {
     if (!item || item === "미분류") return null;
     return MX_ITEMS.has(item) ? "MX" : "CE";
@@ -1088,8 +1093,8 @@
     }
     if (!rows) rows = await parseDataFile(f.path);
     if (rows.length === 0) return [];
-    const productType = detectProductType(f.platform, f.name);
     const cols = new Set(Object.keys(rows[0]));
+    const productType = detectProductType(f.platform, f.name, cols);
     state.colsByFile.set(f.path, cols);
     const dateCol = resolveFieldForCols(cols, f.platform, "date");
     // 품목 분류는 INDEX 조회표가 준비돼야 한다. raw 파일 fetch가 INDEX
