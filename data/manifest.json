@@ -1,15 +1,6 @@
 {
   "files": [
     {
-      "platform": "coupang",
-      "name": "A01703872_pa_daily_keyword_하만_PA_20261001_20261027.xlsx",
-      "path": "data/coupang/A01703872_pa_daily_keyword_하만_PA_20261001_20261027.xlsx",
-      "size": 769618,
-      "cache": "data/cache/coupang/A01703872_pa_daily_keyword_하만_PA_20261001_20261027.xlsx.json",
-      "fullCache": "data/cache/coupang/A01703872_pa_daily_keyword_하만_PA_20261001_20261027.xlsx.full.json",
-      "keywordCache": "data/cache/coupang/A01703872_pa_daily_keyword_하만_PA_20261001_20261027.xlsx.keywords.json"
-    },
-    {
       "platform": "naver",
       "name": "네이버_GFA_CE_애드부스트_261001~261031.csv",
       "path": "data/naver/네이버_GFA_CE_애드부스트_261001~261031.csv",
