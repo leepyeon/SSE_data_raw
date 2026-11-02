@@ -42,6 +42,9 @@
       keyword: "키워드",
       // NCA 세부품목 보정(의류케어 기획전 캠페인의 세탁기/건조기 구분)용.
       adName: "광고명",
+      // 누적파일 시트의 "광고유형" 칸. PA는 "광고유형"(매출 최적화/수동 성과형),
+      // NCA는 "광고 유형"(상품/동영상) 컬럼에 들어 있다.
+      adType: ["광고유형", "광고 유형"],
       totalConv1d: "총 판매수량(1일)",
       totalRevenue1d: "총 전환매출액(1일)",
       totalConv14d: "총 판매수량(14일)",
@@ -2201,6 +2204,63 @@
     ]);
   }
 
+  // 누적파일: "리포트양식/쿠팡_누적파일RAW.xlsx" 양식. 키워드/상품을 버리고
+  // 날짜+상품유형(PA/NCA)+광고유형+품목+캠페인+광고그룹 단위의 일별 합계.
+  // 원본에 청구 금액 컬럼이 없어서 "청구광고비"는 광고비(VAT 제외)에
+  // VAT 10%를 더한 금액(광고비 x 1.1)으로 채운다.
+  const CUMULATIVE_RAW_HEADER = [
+    "년도", "월", "날짜", "구분", "상품유형", "광고유형", "품목",
+    "캠페인 ID", "캠페인명", "광고그룹",
+    "광고비", "노출수", "클릭수",
+    "총 판매수량(1일)", "직접 판매수량(1일)", "총 전환매출액(1일)", "직접 전환매출액(1일)",
+    "총 판매수량(14일)", "직접 판매수량(14일)", "총 전환매출액(14일)", "직접 전환매출액(14일)",
+    "청구광고비",
+  ];
+
+  function buildCumulativeRawRows(rows) {
+    const platform = "coupang";
+    const groups = new Map();
+    for (const row of rows) {
+      if (row.__platform !== platform) continue;
+      const fp = row.__filePath;
+      const productType = row.__productType;
+      const date = row.__date;
+      if (!date) continue;
+      const item = row.__item;
+      const division = classifyDivision(item);
+      if (!division || !passesFilters(platform, date, productType, item, row.__subItem)) continue;
+      const adType = weeklyRawText(row, fp, platform, "adType");
+      const campaignIdRaw = weeklyRawText(row, fp, platform, "campaignId");
+      const campaignRaw = weeklyRawText(row, fp, platform, "campaign");
+      const groupRaw = weeklyRawText(row, fp, platform, "group");
+      const key = [date, productType, adType, item, campaignIdRaw, campaignRaw, groupRaw].join("\u0001");
+      if (!groups.has(key)) {
+        groups.set(key, { date, division, productType, adType, item, campaignIdRaw, campaignRaw, groupRaw, metrics: {} });
+      }
+      sumWeeklyMetrics(row, fp, platform, groups.get(key).metrics);
+    }
+    const sortKey = (g) => [g.date, g.division, g.productType, g.item, String(g.campaignRaw), String(g.groupRaw)].join("\u0001");
+    return [...groups.values()]
+      .sort((a, b) => (sortKey(a) < sortKey(b) ? -1 : sortKey(a) > sortKey(b) ? 1 : 0))
+      .map((g) => {
+        const cost = g.metrics.cost;
+        return [
+          `${yearOf(g.date)}년`,
+          `${Number(monthOf(g.date))}월`,
+          Number(g.date.replace(/-/g, "")),
+          g.division,
+          g.productType,
+          g.adType,
+          g.item,
+          g.campaignIdRaw,
+          g.campaignRaw,
+          g.groupRaw,
+          ...weeklyMetricValues(g.metrics),
+          Number.isFinite(cost) ? Math.round(cost * 1.1) : "-",
+        ];
+      });
+  }
+
   // 쿠팡_전환상품_RAW: 월간 집계라 주차/날짜/그룹명을 버리고 집행년+집행월+
   // 상품구분+캠페인ID+캠페인명+VIID+상품명 단위로(키워드 구분 없이) 합산.
   const CONVERSION_PRODUCT_HEADER = [
@@ -2661,6 +2721,7 @@
           { name: "월간_쿠팡_RAW", header: MONTHLY_RAW_HEADER, rows: buildMonthlyRawRows(fullRows) },
           { name: "월간_쿠팡_전환상품_RAW", header: CONVERSION_PRODUCT_HEADER, rows: buildConversionProductRows(fullRows) },
           { name: "월간_쿠팡 키워드_RAW", header: KEYWORD_HEADER, rows: buildKeywordRows(fullRows) },
+          { name: "누적파일", header: CUMULATIVE_RAW_HEADER, rows: buildCumulativeRawRows(fullRows) },
           // 품목별·월별 코멘트 - 숨김 시트(엑셀에서 "숨기기 취소"로 볼 수 있음)
           { name: "코멘트", header: COMMENT_HEADER, rows: buildItemCommentRows(fullRows), hidden: true },
         ];
