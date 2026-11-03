@@ -104,6 +104,36 @@
     },
     {
       "platform": "naver",
+      "name": "네이버_GFA_공계정_애드부스트_261101.csv",
+      "path": "data/naver/네이버_GFA_공계정_애드부스트_261101.csv",
+      "size": 14985
+    },
+    {
+      "platform": "naver",
+      "name": "네이버_GFA_공계정_카탈로그_261101.csv",
+      "path": "data/naver/네이버_GFA_공계정_카탈로그_261101.csv",
+      "size": 1706
+    },
+    {
+      "platform": "naver",
+      "name": "네이버_GFA_팀계정_애드부스트_261101.csv",
+      "path": "data/naver/네이버_GFA_팀계정_애드부스트_261101.csv",
+      "size": 3866
+    },
+    {
+      "platform": "naver",
+      "name": "네이버_GFA_팀계정_카탈로그_261101.csv",
+      "path": "data/naver/네이버_GFA_팀계정_카탈로그_261101.csv",
+      "size": 1087
+    },
+    {
+      "platform": "naver",
+      "name": "네이버_쇼핑검색광고_검색어_,1919967_261101.csv",
+      "path": "data/naver/네이버_쇼핑검색광고_검색어_,1919967_261101.csv",
+      "size": 158338
+    },
+    {
+      "platform": "naver",
       "name": "네이버_쇼핑검색광고_검색어_월기준,1919967_261001~261031.csv.csv",
       "path": "data/naver/네이버_쇼핑검색광고_검색어_월기준,1919967_261001~261031.csv.csv",
       "size": 2726698
@@ -113,6 +143,12 @@
       "name": "네이버_쇼핑검색광고_위클리,1919967_261001~261031.csv.csv",
       "path": "data/naver/네이버_쇼핑검색광고_위클리,1919967_261001~261031.csv.csv",
       "size": 266221
+    },
+    {
+      "platform": "naver",
+      "name": "네이버_쇼핑검색광고_위클리,1919967_261101.csv",
+      "path": "data/naver/네이버_쇼핑검색광고_위클리,1919967_261101.csv",
+      "size": 8802
     }
   ],
   "indexFiles": [
