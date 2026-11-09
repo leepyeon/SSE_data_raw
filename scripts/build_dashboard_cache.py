@@ -35,7 +35,7 @@ METRIC_COLS = ["광고비", "노출수", "클릭수", "직접 판매수량(1일)
 
 # 다운로드(CE_RAW/MX_RAW, 쿠팡_RAW, 쿠팡_전환상품_RAW, 쿠팡 키워드_RAW, 누적파일)와
 # 품목 분류에 쓰는 컬럼만 남긴다. "광고유형"(매출 최적화/수동 성과형)은 누적파일 시트용. 행은 합치지 않고 원본 그대로 둔다.
-FULL_TEXT_COLS = ["날짜", "캠페인 ID", "캠페인명", "광고그룹", "광고집행 옵션ID", "광고집행 상품명", "키워드", "광고유형"]
+FULL_TEXT_COLS = ["날짜", "캠페인 ID", "캠페인명", "광고그룹", "광고집행 옵션ID", "광고집행 상품명", "키워드", "광고유형", "광고 노출 지면"]
 FULL_METRIC_COLS = [
     "광고비", "노출수", "클릭수",
     "총 판매수량(1일)", "직접 판매수량(1일)", "총 전환매출액(1일)", "직접 전환매출액(1일)",
@@ -253,6 +253,23 @@ def _keyword_text(v):
     return "" if t in ("-", "None") else t
 
 
+PLACEMENT_COL = "광고 노출 지면"
+
+
+def _placement_keyword_label(placement):
+    """키워드가 없는 행의 노출 지면 표기. 비검색 영역 -> "비검색 영역",
+    "오디언스 플러스(외부 채널) - Product Ad" -> "외부 채널". 그 외는 ""."""
+    p = str(_clean(placement) if placement is not None else "")
+    if "비검색" in p:
+        return "비검색 영역"
+    if "외부 채널" in p or "오디언스" in p:
+        return "외부 채널"
+    return ""
+
+
+NO_KEYWORD_LABELS = {"", "비검색 영역", "외부 채널"}
+
+
 def build_keyword_cache(rows, index, meta):
     """월+캠페인ID+캠페인명+키워드로 합친 뒤, 캠페인·월마다 전환매출 발생/미발생
     키워드를 각각 광고비 상위 KEYWORD_TOP_N개만 남긴 키워드 캐시."""
@@ -268,7 +285,8 @@ def build_keyword_cache(rows, index, meta):
             month,
             _clean(r.get(index.get("캠페인 ID"), "")),
             _clean(r.get(index.get("캠페인명"), "")),
-            _keyword_text(r.get(index[KEYWORD_COL], "")),
+            _keyword_text(r.get(index[KEYWORD_COL], ""))
+            or _placement_keyword_label(r.get(index[PLACEMENT_COL]) if PLACEMENT_COL in index else None),
         )
         acc = groups.get(key)
         if acc is None:
@@ -289,8 +307,9 @@ def build_keyword_cache(rows, index, meta):
         # 키워드가 빈 행(비검색 영역 등 검색어 없이 노출)은 순위와 별개로 항상
         # 남기고, 실제 키워드는 전환매출 발생/미발생 각각 광고비 상위
         # KEYWORD_TOP_N개를 남긴다(대시보드 표의 발생/미발생 필터용).
-        kept.extend([kv for kv in items if not kv[0][3]])
-        real = [kv for kv in items if kv[0][3]]
+        # 키워드 없는 행은 노출 지면으로 "비검색 영역"/"외부 채널" 표기.
+        kept.extend([kv for kv in items if kv[0][3] in NO_KEYWORD_LABELS])
+        real = [kv for kv in items if kv[0][3] not in NO_KEYWORD_LABELS]
         kept.extend([kv for kv in real if kv[1][rev_i] > 0][:KEYWORD_TOP_N])
         kept.extend([kv for kv in real if not kv[1][rev_i] > 0][:KEYWORD_TOP_N])
     columns = ["월", "캠페인 ID", "캠페인명", KEYWORD_COL]
