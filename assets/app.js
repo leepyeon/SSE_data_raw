@@ -1719,12 +1719,16 @@
       .map((c) => `<option value="${escapeHtml(c.id)}"${c.id === state.keywordCampaign ? " selected" : ""}>${escapeHtml(c.name)} (광고비 ${escapeHtml(koreanMoney(c.cost))})</option>`)
       .join("");
     const groups = new Map();
-    const NO_KEYWORD = "키워드 없음 (비검색·외부 지면 등)";
+    // 키워드 캐시는 키워드 없는 행을 노출 지면("비검색 영역"/"외부 채널")으로
+    // 적어둔다. 그래도 지면을 모르는 빈 키워드는 "키워드 없음"으로 묶는다.
+    const NO_KEYWORD = "키워드 없음";
+    const PLACEMENT_LABELS = new Set(["비검색 영역", "외부 채널"]);
     for (const r of rows) {
       if (String(r["캠페인 ID"]) !== state.keywordCampaign) continue;
       const raw = String(r["키워드"] ?? "").trim();
       const kw = raw && raw !== "-" ? raw : NO_KEYWORD;
-      accumulateRow(groups, kw, { keyword: kw, noKeyword: kw === NO_KEYWORD }, r, r.__filePath, platform);
+      const noKeyword = kw === NO_KEYWORD || PLACEMENT_LABELS.has(kw);
+      accumulateRow(groups, kw, { keyword: kw, noKeyword }, r, r.__filePath, platform);
     }
     const all = finalizeGroups(groups);
     // 표 안의 전환매출 필터: 발생(전환매출 > 0) / 미발생(0)
@@ -2136,7 +2140,7 @@
         weeklyRawText(row, fp, platform, "group"),
         weeklyRawText(row, fp, platform, "viid"),
         weeklyRawText(row, fp, platform, "execProductName"),
-        weeklyRawText(row, fp, platform, "keyword"),
+        coupangKeywordText(row, fp),
         weeklyRawNum(row, fp, platform, "cost"),
         weeklyRawNum(row, fp, platform, "impressions"),
         weeklyRawNum(row, fp, platform, "clicks"),
@@ -2462,6 +2466,25 @@
     "세부 품목",
   ];
 
+  // 쿠팡 PA는 비검색 영역/외부 채널 노출이면 원본 키워드가 "-"라서, RAW
+  // 다운로드에서는 키워드 칸에 노출 지면을 적는다.
+  //   "비검색 영역" -> "비검색 영역"
+  //   "오디언스 플러스(외부 채널) - Product Ad" -> "외부 채널"
+  // 검색 영역인데 키워드가 없는 경우나 NCA 등은 그대로 "-".
+  function placementKeywordLabel(placement) {
+    const p = String(placement ?? "");
+    if (p.includes("비검색")) return "비검색 영역";
+    if (p.includes("외부 채널") || p.includes("오디언스")) return "외부 채널";
+    return "";
+  }
+
+  function coupangKeywordText(row, fp) {
+    const kw = weeklyRawText(row, fp, "coupang", "keyword");
+    if (String(kw).trim() !== "-") return kw;
+    const placementCol = resolveField(fp, "coupang", "placement");
+    return (placementCol && placementKeywordLabel(row[placementCol])) || "-";
+  }
+
   function buildKeywordRows(rows) {
     const platform = "coupang";
     const groups = new Map();
@@ -2478,7 +2501,7 @@
       const campaignIdRaw = weeklyRawText(row, fp, platform, "campaignId");
       const campaignRaw = weeklyRawText(row, fp, platform, "campaign");
       const viidRaw = weeklyRawText(row, fp, platform, "viid");
-      const keywordRaw = weeklyRawText(row, fp, platform, "keyword");
+      const keywordRaw = coupangKeywordText(row, fp);
       const year = yearOf(date);
       const month = monthOf(date);
       const key = [year, month, campaignIdRaw, campaignRaw, viidRaw, keywordRaw].join("\u0001");
