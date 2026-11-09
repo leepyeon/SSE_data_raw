@@ -26,6 +26,24 @@
     },
     {
       "platform": "coupang",
+      "name": "2620261109_A00111021_CE_NCA_custom_report.xlsx",
+      "path": "data/coupang/2620261109_A00111021_CE_NCA_custom_report.xlsx",
+      "size": 40839
+    },
+    {
+      "platform": "coupang",
+      "name": "2620261109_A00534677_custom_report_MX_NCA_261102~261108.xlsx",
+      "path": "data/coupang/2620261109_A00534677_custom_report_MX_NCA_261102~261108.xlsx",
+      "size": 103286
+    },
+    {
+      "platform": "coupang",
+      "name": "A00111021_ba_daily_adGroup_CE_BA_20261102_20261108.xlsx",
+      "path": "data/coupang/A00111021_ba_daily_adGroup_CE_BA_20261102_20261108.xlsx",
+      "size": 51940
+    },
+    {
+      "platform": "coupang",
       "name": "A00111021_pa_daily_keyword_CE_20261001_20261031 2.xlsb",
       "path": "data/coupang/A00111021_pa_daily_keyword_CE_20261001_20261031 2.xlsb",
       "size": 10002622,
@@ -41,6 +59,15 @@
       "cache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_20261101_20261101.xlsx.json",
       "fullCache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_20261101_20261101.xlsx.full.json",
       "keywordCache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_20261101_20261101.xlsx.keywords.json"
+    },
+    {
+      "platform": "coupang",
+      "name": "A00111021_pa_daily_keyword_CE_PA_20261102_20261108.xlsx",
+      "path": "data/coupang/A00111021_pa_daily_keyword_CE_PA_20261102_20261108.xlsx",
+      "size": 7606936,
+      "cache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_PA_20261102_20261108.xlsx.json",
+      "fullCache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_PA_20261102_20261108.xlsx.full.json",
+      "keywordCache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_PA_20261102_20261108.xlsx.keywords.json"
     },
     {
       "platform": "coupang",
@@ -62,6 +89,15 @@
     },
     {
       "platform": "coupang",
+      "name": "A00534677_pa_daily_keyword_MX_PA_20261102_20261108.xlsx",
+      "path": "data/coupang/A00534677_pa_daily_keyword_MX_PA_20261102_20261108.xlsx",
+      "size": 1878450,
+      "cache": "data/cache/coupang/A00534677_pa_daily_keyword_MX_PA_20261102_20261108.xlsx.json",
+      "fullCache": "data/cache/coupang/A00534677_pa_daily_keyword_MX_PA_20261102_20261108.xlsx.full.json",
+      "keywordCache": "data/cache/coupang/A00534677_pa_daily_keyword_MX_PA_20261102_20261108.xlsx.keywords.json"
+    },
+    {
+      "platform": "coupang",
       "name": "A01703872_pa_daily_keyword_CE(하만)_20261001_20261031 1.xlsx",
       "path": "data/coupang/A01703872_pa_daily_keyword_CE(하만)_20261001_20261031 1.xlsx",
       "size": 875816,
@@ -77,6 +113,15 @@
       "cache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_20261101_20261101.xlsx.json",
       "fullCache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_20261101_20261101.xlsx.full.json",
       "keywordCache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_20261101_20261101.xlsx.keywords.json"
+    },
+    {
+      "platform": "coupang",
+      "name": "A01703872_pa_daily_keyword_CE(하만)_PA_20261102_20261108.xlsx",
+      "path": "data/coupang/A01703872_pa_daily_keyword_CE(하만)_PA_20261102_20261108.xlsx",
+      "size": 151955,
+      "cache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_PA_20261102_20261108.xlsx.json",
+      "fullCache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_PA_20261102_20261108.xlsx.full.json",
+      "keywordCache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_PA_20261102_20261108.xlsx.keywords.json"
     },
     {
       "platform": "naver",
