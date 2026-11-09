@@ -21,6 +21,7 @@ on:
       - "data/naver/**.xlsb"
       - "scripts/build_dashboard_cache.py"
       - "scripts/build_manifest.py"
+      - "scripts/strip_office_metadata.py"
       - "INDEX/**.xlsb"
       - "INDEX/**.xlsx"
       - "INDEX/**.xls"
@@ -50,6 +51,11 @@ jobs:
         with:
           python-version: "3.x"
 
+      # 올라온 엑셀 파일 속성에 남은 작성자/수정자/회사 이름과 PC 저장 경로를
+      # 지운다(셀 데이터는 그대로). 이 저장소 파일은 사이트로 그대로 공개된다.
+      - name: Strip Excel metadata
+        run: python3 scripts/strip_office_metadata.py
+
       # 쿠팡 키워드 리포트(수십만 행)를 키워드만 합친 가벼운 JSON으로 미리
       # 만들어둔다. 대시보드는 브라우저에서 원본을 해석하는 대신 이걸 읽는다
       # (원본 해석은 메모리가 많이 들어서 모바일에서 무한로딩이 됐음).
@@ -66,9 +72,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           for attempt in 1 2 3; do
-            git add -A data/manifest.json data/cache
+            git add -A data/manifest.json data/cache data/coupang data/naver INDEX 리포트양식
             if git diff --cached --quiet; then
-              echo "manifest.json / 캐시 변경 없음"
+              echo "manifest.json / 캐시 / 메타데이터 변경 없음"
               exit 0
             fi
             git commit -m "chore: update data manifest"
@@ -78,6 +84,7 @@ jobs:
             echo "push 실패(main이 그새 바뀜) - 최신 main으로 다시 만들어서 재시도 ($attempt/3)"
             git fetch origin main
             git reset --hard origin/main
+            python3 scripts/strip_office_metadata.py
             python3 scripts/build_dashboard_cache.py
             python3 scripts/build_manifest.py
           done
