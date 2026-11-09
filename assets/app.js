@@ -8,7 +8,7 @@
   // 앞에서부터 순서대로 시도). null이면 아래 FIELD_AUTO_PATTERNS로 자동 추정하고,
   // NOT_MAPPED이면 추정도 하지 않고 "-"로 비워둔다.
   //
-  // 쿠팡: PA(키워드), BPA(브랜드 광고그룹), NCA(성과형) raw 샘플을 직접 확인해서 채움.
+  // 쿠팡: PA(키워드), BPA(브랜드 광고그룹), BA(브랜드광고), NCA(성과형) raw 샘플을 직접 확인해서 채움.
   //   같은 개념이라도 상품별로 "광고비" / "집행 광고비" / "광고비(원)"처럼 표기가 다르고,
   //   NCA는 "총 전환 매출액 (1일)(원)"처럼 띄어쓰기와 단위가 더 붙는 식이라
   //   resolveField에서 공백을 지우고 한 번 더 비교(접두 일치)한다.
@@ -101,6 +101,8 @@
       // 필터와 다른 상품이 섞여 나온다.
       PA: "광고집행 상품명",
       BPA: "__campaign",
+      // BA(브랜드광고)는 리포트에 상품명이 없어서 캠페인명으로 묶는다.
+      BA: "__campaign",
       // NCA는 캠페인명이 "[NCA] 10월 브랜드위크_모바일(상품소재)"처럼 여러
       // 상품을 묶는 기획전 이름이라 상품을 구분 못 한다. "광고명"은 실제
       // 광고 소재 단위라 거기 들어간 상품명으로 구분한다.
@@ -597,6 +599,8 @@
   function detectProductType(platform, fileName, cols) {
     if (platform === "coupang") {
       if (/BPA/i.test(fileName)) return "BPA";
+      // 쿠팡 브랜드광고(BA) 리포트: "..._ba_daily_adGroup_CE_BA_....xlsx"
+      if (/(^|[^A-Za-z])BA([^A-Za-z]|$)/.test(fileName) || /ba_daily/i.test(fileName)) return "BA";
       if (/NCA/i.test(fileName)) return "NCA";
       if (/PA/i.test(fileName)) return "PA";
       if (cols && (cols.has("광고명") || cols.has("소재 ID"))) return "NCA";
@@ -829,6 +833,9 @@
     PA: ["campaignId", "campaignName", "groupName", "viid"],
     BPA: ["campaignId", "groupName"],
     NCA: ["campaignName"],
+    // BA(브랜드광고)는 INDEX에 있으면 그걸 쓰고, 없으면 캠페인명에서 품목을
+    // 뽑는다(baItemFromCampaign 참고).
+    BA: ["campaignId", "campaignName"],
     __default__: ["campaignId", "campaignName", "groupName", "viid"],
   };
 
@@ -932,7 +939,7 @@
     if (/탭|태블릿/.test(values.campaignName)) {
       return { item: "태블릿", subItem: "태블릿" };
     }
-    if (!maps) return unclassified;
+    if (!maps) return (productType === "BA" && baItemFromCampaign(values.campaignName)) || unclassified;
     const mapFor = {
       campaignId: maps.byCampaignId,
       campaignName: maps.byCampaignName,
@@ -957,7 +964,15 @@
         return result;
       }
     }
+    if (productType === "BA") return baItemFromCampaign(values.campaignName) || unclassified;
     return unclassified;
+  }
+
+  // BA(브랜드광고) 캠페인명 "[BA] 청소기_VR70/80/90"에서 앞의 [..] 꼬리표를
+  // 떼고 첫 "_" 앞 부분("청소기")을 품목으로 쓴다. 세부품목도 같은 값.
+  function baItemFromCampaign(campaignName) {
+    const item = String(campaignName ?? "").replace(/^\s*\[[^\]]*\]\s*/, "").split("_")[0].trim();
+    return item ? { item, subItem: item } : null;
   }
 
   // 품목 -> 사업부(CE/MX). 웨어러블/모바일/태블릿은 MX, 그 외 알려진 품목은 CE,
