@@ -80,6 +80,18 @@
     },
     {
       "platform": "naver",
+      "name": "(이커머스)SSA_검색어_위클리,1919967_261102_261108.csv",
+      "path": "data/naver/(이커머스)SSA_검색어_위클리,1919967_261102_261108.csv",
+      "size": 1463302
+    },
+    {
+      "platform": "naver",
+      "name": "(이커머스)SSA_위클리,1919967_261102_261108.csv",
+      "path": "data/naver/(이커머스)SSA_위클리,1919967_261102_261108.csv",
+      "size": 69063
+    },
+    {
+      "platform": "naver",
       "name": "네이버_GFA_CE_애드부스트_261001~261031.csv",
       "path": "data/naver/네이버_GFA_CE_애드부스트_261001~261031.csv",
       "size": 664321
@@ -110,9 +122,21 @@
     },
     {
       "platform": "naver",
+      "name": "네이버_GFA_공계정_애드부스트_261109.csv",
+      "path": "data/naver/네이버_GFA_공계정_애드부스트_261109.csv",
+      "size": 105835
+    },
+    {
+      "platform": "naver",
       "name": "네이버_GFA_공계정_카탈로그_261101.csv",
       "path": "data/naver/네이버_GFA_공계정_카탈로그_261101.csv",
       "size": 1706
+    },
+    {
+      "platform": "naver",
+      "name": "네이버_GFA_공계정_카탈로그_261109.csv",
+      "path": "data/naver/네이버_GFA_공계정_카탈로그_261109.csv",
+      "size": 8589
     },
     {
       "platform": "naver",
@@ -122,9 +146,21 @@
     },
     {
       "platform": "naver",
+      "name": "네이버_GFA_팀계정_애드부스트_261109.csv",
+      "path": "data/naver/네이버_GFA_팀계정_애드부스트_261109.csv",
+      "size": 25534
+    },
+    {
+      "platform": "naver",
       "name": "네이버_GFA_팀계정_카탈로그_261101.csv",
       "path": "data/naver/네이버_GFA_팀계정_카탈로그_261101.csv",
       "size": 1087
+    },
+    {
+      "platform": "naver",
+      "name": "네이버_GFA_팀계정_카탈로그_261109.csv",
+      "path": "data/naver/네이버_GFA_팀계정_카탈로그_261109.csv",
+      "size": 6158
     },
     {
       "platform": "naver",
