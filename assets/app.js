@@ -445,13 +445,12 @@
     return range ? range[0] : null;
   }
 
-  // "YYYY-MM-DD" -> CE/MX 주간RAW 양식이 쓰는 "N월 M주차" (그 달 1일부터
-  // 7일 단위로 끊은 주차. 주간RAW 표1~4의 월요일~일요일 주차(weekOf)와는
-  // 다른 기준이라 별도로 둔다).
+  // "YYYY-MM-DD" -> CE/MX 주간RAW 양식이 쓰는 "N월 M주차". 대시보드와 같은
+  // 월요일~일요일 주차(weekOf)로, 그 주의 목요일이 속한 달 기준이다.
+  // 예: 11.02~11.08 -> "11월 1주차", 10.26~11.01 -> "10월 5주차".
   function weekOfMonthLabel(dateStr) {
-    const month = Number(monthOf(dateStr));
-    const day = Number(dateStr.slice(8, 10));
-    return `${month}월 ${Math.ceil(day / 7)}주차`;
+    const w = weekOf(dateStr);
+    return `${w.month}월 ${w.n}주차`;
   }
 
   // 년도/월/주차/구분(CE·MX)/광고상품유형/품목/상세 품목 슬라이서 선택 상태에
