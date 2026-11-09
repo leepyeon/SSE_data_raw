@@ -8,7 +8,7 @@
   // 앞에서부터 순서대로 시도). null이면 아래 FIELD_AUTO_PATTERNS로 자동 추정하고,
   // NOT_MAPPED이면 추정도 하지 않고 "-"로 비워둔다.
   //
-  // 쿠팡: PA(키워드), BPA(브랜드 광고그룹), NCA(성과형) raw 샘플을 직접 확인해서 채움.
+  // 쿠팡: PA(키워드), BPA(브랜드 광고그룹), BA(브랜드광고), NCA(성과형) raw 샘플을 직접 확인해서 채움.
   //   같은 개념이라도 상품별로 "광고비" / "집행 광고비" / "광고비(원)"처럼 표기가 다르고,
   //   NCA는 "총 전환 매출액 (1일)(원)"처럼 띄어쓰기와 단위가 더 붙는 식이라
   //   resolveField에서 공백을 지우고 한 번 더 비교(접두 일치)한다.
@@ -101,6 +101,8 @@
       // 필터와 다른 상품이 섞여 나온다.
       PA: "광고집행 상품명",
       BPA: "__campaign",
+      // BA(브랜드광고)는 리포트에 상품명이 없어서 캠페인명으로 묶는다.
+      BA: "__campaign",
       // NCA는 캠페인명이 "[NCA] 10월 브랜드위크_모바일(상품소재)"처럼 여러
       // 상품을 묶는 기획전 이름이라 상품을 구분 못 한다. "광고명"은 실제
       // 광고 소재 단위라 거기 들어간 상품명으로 구분한다.
@@ -418,12 +420,29 @@
   // "쇼핑검색_검색어_RAW" 리포트처럼 행에 날짜 컬럼이 없고 파일명에만 날짜
   // 범위가 있는 경우("..._261027~261027.csv", "..._20260914~20260916.csv")
   // 쓰는 보조 함수. 범위의 시작일을 대표 날짜로 쓴다.
+  // 날짜는 6자리(261102) 또는 8자리(20261102)만 본다 - 광고주 ID(1919967, 7자리)나
+  // 쿠팡 파일 앞의 10자리 숫자와 헷갈리지 않게. 범위 구분자는 ~, -, _ 모두 허용
+  // ("..._261102_261108.csv"). 범위가 없으면 하루짜리("..._261101.csv")로 본다.
+  function fileDateRange(fileName) {
+    const name = String(fileName || "");
+    const toDate = (s) => parseDateLoose(s.length === 6 ? `20${s}` : s);
+    const range = name.match(/(?<!\d)(\d{6}|\d{8})\s*[~_-]\s*(\d{6}|\d{8})(?!\d)/);
+    if (range) {
+      const a = toDate(range[1]);
+      const b = toDate(range[2]);
+      if (a && b) return [a, b];
+    }
+    const singles = [...name.matchAll(/(?<!\d)(\d{6}|\d{8})(?!\d)/g)];
+    for (let i = singles.length - 1; i >= 0; i--) {
+      const d = toDate(singles[i][1]);
+      if (d) return [d, d];
+    }
+    return null;
+  }
+
   function parseDateFromFileName(fileName) {
-    const m = String(fileName || "").match(/(\d{6,8})\s*[~-]/);
-    if (!m) return null;
-    let s = m[1];
-    if (s.length === 6) s = `20${s}`;
-    return parseDateLoose(s);
+    const range = fileDateRange(fileName);
+    return range ? range[0] : null;
   }
 
   // "YYYY-MM-DD" -> CE/MX 주간RAW 양식이 쓰는 "N월 M주차" (그 달 1일부터
@@ -597,6 +616,8 @@
   function detectProductType(platform, fileName, cols) {
     if (platform === "coupang") {
       if (/BPA/i.test(fileName)) return "BPA";
+      // 쿠팡 브랜드광고(BA) 리포트: "..._ba_daily_adGroup_CE_BA_....xlsx"
+      if (/(^|[^A-Za-z])BA([^A-Za-z]|$)/.test(fileName) || /ba_daily/i.test(fileName)) return "BA";
       if (/NCA/i.test(fileName)) return "NCA";
       if (/PA/i.test(fileName)) return "PA";
       if (cols && (cols.has("광고명") || cols.has("소재 ID"))) return "NCA";
@@ -604,7 +625,9 @@
       return "기타";
     }
     if (platform === "naver") {
-      if (fileName.includes("쇼핑검색")) return "쇼핑검색광고(카탈로그)";
+      // 11/9부터 쇼핑검색광고 파일명이 "(이커머스)SSA_위클리,..."처럼 바뀌어서
+      // "쇼핑검색"이 없어도 SSA(Shopping Search Ad)면 같은 유형으로 본다.
+      if (fileName.includes("쇼핑검색") || /(^|[^A-Za-z])SSA([^A-Za-z]|$)/.test(fileName)) return "쇼핑검색광고(카탈로그)";
       if (fileName.includes("애드부스트")) return "애드부스트";
       if (fileName.includes("카탈로그")) return "카탈로그";
       return "기타";
@@ -829,6 +852,9 @@
     PA: ["campaignId", "campaignName", "groupName", "viid"],
     BPA: ["campaignId", "groupName"],
     NCA: ["campaignName"],
+    // BA(브랜드광고)는 INDEX에 있으면 그걸 쓰고, 없으면 캠페인명에서 품목을
+    // 뽑는다(baItemFromCampaign 참고).
+    BA: ["campaignId", "campaignName"],
     __default__: ["campaignId", "campaignName", "groupName", "viid"],
   };
 
@@ -932,7 +958,7 @@
     if (/탭|태블릿/.test(values.campaignName)) {
       return { item: "태블릿", subItem: "태블릿" };
     }
-    if (!maps) return unclassified;
+    if (!maps) return (productType === "BA" && baItemFromCampaign(values.campaignName)) || unclassified;
     const mapFor = {
       campaignId: maps.byCampaignId,
       campaignName: maps.byCampaignName,
@@ -957,7 +983,15 @@
         return result;
       }
     }
+    if (productType === "BA") return baItemFromCampaign(values.campaignName) || unclassified;
     return unclassified;
+  }
+
+  // BA(브랜드광고) 캠페인명 "[BA] 청소기_VR70/80/90"에서 앞의 [..] 꼬리표를
+  // 떼고 첫 "_" 앞 부분("청소기")을 품목으로 쓴다. 세부품목도 같은 값.
+  function baItemFromCampaign(campaignName) {
+    const item = String(campaignName ?? "").replace(/^\s*\[[^\]]*\]\s*/, "").split("_")[0].trim();
+    return item ? { item, subItem: item } : null;
   }
 
   // 품목 -> 사업부(CE/MX). 웨어러블/모바일/태블릿은 MX, 그 외 알려진 품목은 CE,
@@ -3185,12 +3219,9 @@
   // 나눌 수 없다. 파일 기간이 한 주(월~일) 안이면 그 주차, 아니면 기간
   // ("10.01~10.27")을 주차 칸에 넣는다.
   function fileWeekLabel(fileName) {
-    const m = String(fileName || "").match(/(\d{6,8})\s*[~-]\s*(\d{6,8})/);
-    if (!m) return "-";
-    const toDate = (s) => parseDateLoose(s.length === 6 ? `20${s}` : s);
-    const a = toDate(m[1]);
-    const b = toDate(m[2]);
-    if (!a || !b) return "-";
+    const range = fileDateRange(fileName);
+    if (!range) return "-";
+    const [a, b] = range;
     if (weekKeyOf(a) === weekKeyOf(b)) return weekNameLabel(a);
     return `${a.slice(5).replace("-", ".")}~${b.slice(5).replace("-", ".")}`;
   }
