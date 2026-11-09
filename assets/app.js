@@ -420,12 +420,29 @@
   // "쇼핑검색_검색어_RAW" 리포트처럼 행에 날짜 컬럼이 없고 파일명에만 날짜
   // 범위가 있는 경우("..._261027~261027.csv", "..._20260914~20260916.csv")
   // 쓰는 보조 함수. 범위의 시작일을 대표 날짜로 쓴다.
+  // 날짜는 6자리(261102) 또는 8자리(20261102)만 본다 - 광고주 ID(1919967, 7자리)나
+  // 쿠팡 파일 앞의 10자리 숫자와 헷갈리지 않게. 범위 구분자는 ~, -, _ 모두 허용
+  // ("..._261102_261108.csv"). 범위가 없으면 하루짜리("..._261101.csv")로 본다.
+  function fileDateRange(fileName) {
+    const name = String(fileName || "");
+    const toDate = (s) => parseDateLoose(s.length === 6 ? `20${s}` : s);
+    const range = name.match(/(?<!\d)(\d{6}|\d{8})\s*[~_-]\s*(\d{6}|\d{8})(?!\d)/);
+    if (range) {
+      const a = toDate(range[1]);
+      const b = toDate(range[2]);
+      if (a && b) return [a, b];
+    }
+    const singles = [...name.matchAll(/(?<!\d)(\d{6}|\d{8})(?!\d)/g)];
+    for (let i = singles.length - 1; i >= 0; i--) {
+      const d = toDate(singles[i][1]);
+      if (d) return [d, d];
+    }
+    return null;
+  }
+
   function parseDateFromFileName(fileName) {
-    const m = String(fileName || "").match(/(\d{6,8})\s*[~-]/);
-    if (!m) return null;
-    let s = m[1];
-    if (s.length === 6) s = `20${s}`;
-    return parseDateLoose(s);
+    const range = fileDateRange(fileName);
+    return range ? range[0] : null;
   }
 
   // "YYYY-MM-DD" -> CE/MX 주간RAW 양식이 쓰는 "N월 M주차" (그 달 1일부터
@@ -608,7 +625,9 @@
       return "기타";
     }
     if (platform === "naver") {
-      if (fileName.includes("쇼핑검색")) return "쇼핑검색광고(카탈로그)";
+      // 11/9부터 쇼핑검색광고 파일명이 "(이커머스)SSA_위클리,..."처럼 바뀌어서
+      // "쇼핑검색"이 없어도 SSA(Shopping Search Ad)면 같은 유형으로 본다.
+      if (fileName.includes("쇼핑검색") || /(^|[^A-Za-z])SSA([^A-Za-z]|$)/.test(fileName)) return "쇼핑검색광고(카탈로그)";
       if (fileName.includes("애드부스트")) return "애드부스트";
       if (fileName.includes("카탈로그")) return "카탈로그";
       return "기타";
@@ -3200,12 +3219,9 @@
   // 나눌 수 없다. 파일 기간이 한 주(월~일) 안이면 그 주차, 아니면 기간
   // ("10.01~10.27")을 주차 칸에 넣는다.
   function fileWeekLabel(fileName) {
-    const m = String(fileName || "").match(/(\d{6,8})\s*[~-]\s*(\d{6,8})/);
-    if (!m) return "-";
-    const toDate = (s) => parseDateLoose(s.length === 6 ? `20${s}` : s);
-    const a = toDate(m[1]);
-    const b = toDate(m[2]);
-    if (!a || !b) return "-";
+    const range = fileDateRange(fileName);
+    if (!range) return "-";
+    const [a, b] = range;
     if (weekKeyOf(a) === weekKeyOf(b)) return weekNameLabel(a);
     return `${a.slice(5).replace("-", ".")}~${b.slice(5).replace("-", ".")}`;
   }
