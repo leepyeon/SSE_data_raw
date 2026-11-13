@@ -4,49 +4,49 @@
       "platform": "coupang",
       "name": "2620261102_A00111021_custom_report_CE_261001~261031 1.xlsx",
       "path": "data/coupang/2620261102_A00111021_custom_report_CE_261001~261031 1.xlsx",
-      "size": 178899
+      "size": 178746
     },
     {
       "platform": "coupang",
       "name": "2620261102_A00111021_custom_report_CE_261101~261101.xlsx",
       "path": "data/coupang/2620261102_A00111021_custom_report_CE_261101~261101.xlsx",
-      "size": 10023
+      "size": 9869
     },
     {
       "platform": "coupang",
       "name": "2620261102_A00534677_custom_report_MX_261001~261031.xlsx",
       "path": "data/coupang/2620261102_A00534677_custom_report_MX_261001~261031.xlsx",
-      "size": 456246
+      "size": 456093
     },
     {
       "platform": "coupang",
       "name": "2620261102_A00534677_custom_report_MX_261101~261101.xlsx",
       "path": "data/coupang/2620261102_A00534677_custom_report_MX_261101~261101.xlsx",
-      "size": 18361
+      "size": 18208
     },
     {
       "platform": "coupang",
       "name": "2620261109_A00111021_CE_NCA_custom_report.xlsx",
       "path": "data/coupang/2620261109_A00111021_CE_NCA_custom_report.xlsx",
-      "size": 40839
+      "size": 40685
     },
     {
       "platform": "coupang",
       "name": "2620261109_A00534677_custom_report_MX_NCA_261102~261108.xlsx",
       "path": "data/coupang/2620261109_A00534677_custom_report_MX_NCA_261102~261108.xlsx",
-      "size": 103286
+      "size": 103132
     },
     {
       "platform": "coupang",
       "name": "A00111021_ba_daily_adGroup_CE_BA_20261102_20261108.xlsx",
       "path": "data/coupang/A00111021_ba_daily_adGroup_CE_BA_20261102_20261108.xlsx",
-      "size": 51940
+      "size": 51787
     },
     {
       "platform": "coupang",
       "name": "A00111021_pa_daily_keyword_CE_20261001_20261031 2.xlsb",
       "path": "data/coupang/A00111021_pa_daily_keyword_CE_20261001_20261031 2.xlsb",
-      "size": 10002622,
+      "size": 6824321,
       "cache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_20261001_20261031 2.xlsb.json",
       "fullCache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_20261001_20261031 2.xlsb.full.json",
       "keywordCache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_20261001_20261031 2.xlsb.keywords.json"
@@ -55,7 +55,7 @@
       "platform": "coupang",
       "name": "A00111021_pa_daily_keyword_CE_20261101_20261101.xlsx",
       "path": "data/coupang/A00111021_pa_daily_keyword_CE_20261101_20261101.xlsx",
-      "size": 1077799,
+      "size": 1077646,
       "cache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_20261101_20261101.xlsx.json",
       "fullCache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_20261101_20261101.xlsx.full.json",
       "keywordCache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_20261101_20261101.xlsx.keywords.json"
@@ -64,7 +64,7 @@
       "platform": "coupang",
       "name": "A00111021_pa_daily_keyword_CE_PA_20261102_20261108.xlsx",
       "path": "data/coupang/A00111021_pa_daily_keyword_CE_PA_20261102_20261108.xlsx",
-      "size": 7606936,
+      "size": 7606783,
       "cache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_PA_20261102_20261108.xlsx.json",
       "fullCache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_PA_20261102_20261108.xlsx.full.json",
       "keywordCache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_PA_20261102_20261108.xlsx.keywords.json"
@@ -73,7 +73,7 @@
       "platform": "coupang",
       "name": "A00534677_pa_daily_keyword_MX_20261001_20261031.xlsb",
       "path": "data/coupang/A00534677_pa_daily_keyword_MX_20261001_20261031.xlsb",
-      "size": 2233303,
+      "size": 1415631,
       "cache": "data/cache/coupang/A00534677_pa_daily_keyword_MX_20261001_20261031.xlsb.json",
       "fullCache": "data/cache/coupang/A00534677_pa_daily_keyword_MX_20261001_20261031.xlsb.full.json",
       "keywordCache": "data/cache/coupang/A00534677_pa_daily_keyword_MX_20261001_20261031.xlsb.keywords.json"
@@ -82,7 +82,7 @@
       "platform": "coupang",
       "name": "A00534677_pa_daily_keyword_MX_20261101_20261101.xlsx",
       "path": "data/coupang/A00534677_pa_daily_keyword_MX_20261101_20261101.xlsx",
-      "size": 267890,
+      "size": 267737,
       "cache": "data/cache/coupang/A00534677_pa_daily_keyword_MX_20261101_20261101.xlsx.json",
       "fullCache": "data/cache/coupang/A00534677_pa_daily_keyword_MX_20261101_20261101.xlsx.full.json",
       "keywordCache": "data/cache/coupang/A00534677_pa_daily_keyword_MX_20261101_20261101.xlsx.keywords.json"
@@ -91,7 +91,7 @@
       "platform": "coupang",
       "name": "A00534677_pa_daily_keyword_MX_PA_20261102_20261108.xlsx",
       "path": "data/coupang/A00534677_pa_daily_keyword_MX_PA_20261102_20261108.xlsx",
-      "size": 1878450,
+      "size": 1878296,
       "cache": "data/cache/coupang/A00534677_pa_daily_keyword_MX_PA_20261102_20261108.xlsx.json",
       "fullCache": "data/cache/coupang/A00534677_pa_daily_keyword_MX_PA_20261102_20261108.xlsx.full.json",
       "keywordCache": "data/cache/coupang/A00534677_pa_daily_keyword_MX_PA_20261102_20261108.xlsx.keywords.json"
@@ -100,7 +100,7 @@
       "platform": "coupang",
       "name": "A01703872_pa_daily_keyword_CE(하만)_20261001_20261031 1.xlsx",
       "path": "data/coupang/A01703872_pa_daily_keyword_CE(하만)_20261001_20261031 1.xlsx",
-      "size": 875816,
+      "size": 875662,
       "cache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_20261001_20261031 1.xlsx.json",
       "fullCache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_20261001_20261031 1.xlsx.full.json",
       "keywordCache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_20261001_20261031 1.xlsx.keywords.json"
@@ -109,7 +109,7 @@
       "platform": "coupang",
       "name": "A01703872_pa_daily_keyword_CE(하만)_20261101_20261101.xlsx",
       "path": "data/coupang/A01703872_pa_daily_keyword_CE(하만)_20261101_20261101.xlsx",
-      "size": 34928,
+      "size": 34774,
       "cache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_20261101_20261101.xlsx.json",
       "fullCache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_20261101_20261101.xlsx.full.json",
       "keywordCache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_20261101_20261101.xlsx.keywords.json"
@@ -118,7 +118,7 @@
       "platform": "coupang",
       "name": "A01703872_pa_daily_keyword_CE(하만)_PA_20261102_20261108.xlsx",
       "path": "data/coupang/A01703872_pa_daily_keyword_CE(하만)_PA_20261102_20261108.xlsx",
-      "size": 151955,
+      "size": 151802,
       "cache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_PA_20261102_20261108.xlsx.json",
       "fullCache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_PA_20261102_20261108.xlsx.full.json",
       "keywordCache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_PA_20261102_20261108.xlsx.keywords.json"
@@ -236,12 +236,12 @@
     {
       "name": "INDEX_260929.xlsb",
       "path": "INDEX/INDEX_260929.xlsb",
-      "size": 107343
+      "size": 100055
     },
     {
       "name": "INDEX_260929_수정.xlsb",
       "path": "INDEX/INDEX_260929_수정.xlsb",
-      "size": 107092
+      "size": 99821
     },
     {
       "name": "INDEX_261028_v2.xlsx",
@@ -256,74 +256,74 @@
     {
       "name": "INDEX_261029.xlsx",
       "path": "INDEX/INDEX_261029.xlsx",
-      "size": 40741
+      "size": 33855
     },
     {
       "name": "INDEX_261029_v2.xlsx",
       "path": "INDEX/INDEX_261029_v2.xlsx",
-      "size": 34189
+      "size": 34024
     },
     {
       "name": "INDEX_261029_v3.xlsx",
       "path": "INDEX/INDEX_261029_v3.xlsx",
-      "size": 34425
+      "size": 34260
     },
     {
       "name": "INDEX_261029_v4.xlsx",
       "path": "INDEX/INDEX_261029_v4.xlsx",
-      "size": 34440
+      "size": 34275
     },
     {
       "name": "INDEX_261029_v5.xlsx",
       "path": "INDEX/INDEX_261029_v5.xlsx",
-      "size": 34690
+      "size": 34525
     },
     {
       "name": "INDEX_261029_v6.xlsx",
       "path": "INDEX/INDEX_261029_v6.xlsx",
-      "size": 34850
+      "size": 34685
     }
   ],
   "reportFormFiles": [
     {
       "name": "CE_MX_주간RAW_양식.xlsb",
       "path": "리포트양식/CE_MX_주간RAW_양식.xlsb",
-      "size": 14031201
+      "size": 10210171
     },
     {
       "name": "네이버 GFA_주간리포트_양식.xlsx",
       "path": "리포트양식/네이버 GFA_주간리포트_양식.xlsx",
-      "size": 93964
+      "size": 81334
     },
     {
       "name": "네이버_GFA_RAW_양식.xlsb",
       "path": "리포트양식/네이버_GFA_RAW_양식.xlsb",
-      "size": 19138
+      "size": 15149
     },
     {
       "name": "네이버_쇼핑검색광고_월간리포트양식RAW.xlsb",
       "path": "리포트양식/네이버_쇼핑검색광고_월간리포트양식RAW.xlsb",
-      "size": 2678990
+      "size": 2667498
     },
     {
       "name": "네이버_쇼핑검색광고_주간리포트_양식.xlsx",
       "path": "리포트양식/네이버_쇼핑검색광고_주간리포트_양식.xlsx",
-      "size": 11231930
+      "size": 8375452
     },
     {
       "name": "쿠팡_누적파일RAW.xlsx",
       "path": "리포트양식/쿠팡_누적파일RAW.xlsx",
-      "size": 9986
+      "size": 7354
     },
     {
       "name": "쿠팡_상품광고_주간리포트_양식.xlsb",
       "path": "리포트양식/쿠팡_상품광고_주간리포트_양식.xlsb",
-      "size": 20263637
+      "size": 15580886
     },
     {
       "name": "쿠팡상품광고_월간리포트양식RAW.xlsb",
       "path": "리포트양식/쿠팡상품광고_월간리포트양식RAW.xlsb",
-      "size": 2603417
+      "size": 2564396
     }
   ]
 }
