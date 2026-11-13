@@ -69,6 +69,14 @@
   SHA-256 값으로 교체). 같은 탭에서는 한 번만 묻습니다. 단, 정적 사이트라
   `data/` 아래 파일 주소를 직접 알면 비밀번호 없이도 받을 수 있는 "가벼운
   잠금"입니다.
+- **보안 설정**:
+  - 엑셀 파일 속성의 작성자/수정자/회사 이름과 PC 저장 경로는 파일을 올릴 때마다
+    GitHub Actions가 `scripts/strip_office_metadata.py`로 자동으로 지웁니다
+    (셀 데이터·시트·서식은 그대로).
+  - 외부에서 불러오는 라이브러리(PapaParse, SheetJS)에 무결성 해시(integrity)를
+    걸어서, CDN 파일이 npm 공식 배포본과 다르면 브라우저가 실행하지 않습니다.
+    라이브러리 버전을 바꿀 때는 해시도 새로 계산해서 바꿔야 합니다.
+  - 검색엔진에 노출되지 않도록 `noindex` 설정이 들어 있습니다.
 - **필터(슬라이서)**: PC에서는 화면 **왼쪽 사이드바**에 고정되어 스크롤해도
   따라오고, 좁은 화면(태블릿/모바일)에서는 위에 있습니다. 년도 / 월 / 주차 / 구분(CE·MX) / 광고상품유형 / 품목 /
   상세 품목 버튼을 눌러서 아래 그래프와 표를 원하는 조건으로만 좁혀볼 수
@@ -228,7 +236,8 @@ INDEX/*.xlsb|xlsx          쿠팡 캠페인 품목 분류표 (수동 업로드)
 리포트양식/*.xlsb|xlsx     다운로드 버튼이 참고하는 양식 파일 (수동 업로드)
 scripts/build_manifest.py  manifest.json을 만드는 스크립트
 scripts/build_dashboard_cache.py   data/cache/를 만드는 스크립트
-.github/workflows/update-manifest.yml   파일 업로드 시 캐시+manifest.json 자동 갱신
+scripts/strip_office_metadata.py   엑셀 파일의 작성자/PC 경로 메타데이터를 지우는 스크립트
+.github/workflows/update-manifest.yml   파일 업로드 시 엑셀 메타데이터 제거 + 캐시+manifest.json 자동 갱신
 ```
 
 ## 참고
