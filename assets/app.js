@@ -112,6 +112,7 @@
       "쇼핑검색광고(카탈로그)": "__campaign",
       애드부스트: "상품명",
       카탈로그: "__group",
+      쇼핑고객확장: "__group",
     },
   };
 
@@ -634,6 +635,19 @@
     return "기타";
   }
 
+  // 네이버 GFA 카탈로그 리포트 안에 섞여 오는 "쇼핑고객확장_..." 캠페인은
+  // 카탈로그가 아니라 별도 광고유형 "쇼핑고객확장"으로 본다(파일 단위가 아니라
+  // 캠페인명 기준이라 행마다 판단).
+  const NAVER_CAMPAIGN_TYPE_PREFIXES = [["쇼핑고객확장", "쇼핑고객확장"]];
+  function naverRowProductType(row, campaignCol, fileProductType) {
+    if (!campaignCol) return fileProductType;
+    const name = String(row[campaignCol] ?? "").replace(/^\(삭제\)\s*/, "").trim();
+    for (const [prefix, type] of NAVER_CAMPAIGN_TYPE_PREFIXES) {
+      if (name.startsWith(prefix)) return type;
+    }
+    return fileProductType;
+  }
+
   // ---------- INDEX/ 품목 분류 ----------
 
   // INDEX 엑셀 한 시트에 캠페인ID/캠페인명/그룹명→품목(B~F열), VIID→품목(H~L열)
@@ -776,7 +790,8 @@
       const sop = hit && hit.sop && hit.sop !== "-" ? hit.sop : "";
       // 카탈로그는 GFA 주간리포트 양식 안내대로 모델명을 "카탈로그_SOP명"(예:
       // 카탈로그_유니씨앤씨)으로 통일한다. INDEX 상품명(카탈로그_유니 등)보다 우선.
-      const catalogModel = productType === "카탈로그" && sop ? `카탈로그_${sop}` : "";
+      // 쇼핑고객확장도 같은 방식으로 "쇼핑고객확장_SOP명".
+      const catalogModel = (productType === "카탈로그" || productType === "쇼핑고객확장") && sop ? `${productType}_${sop}` : "";
       const indexModel = hit && hit.model && hit.model !== "-" ? hit.model : "";
       const model = catalogModel || indexModel || rawName || (item ? "-" : `미분류 · ${campaign || cid}`);
       return { item: item || "미분류", model, sop };
@@ -1135,6 +1150,7 @@
     const productType = detectProductType(f.platform, f.name, cols);
     state.colsByFile.set(f.path, cols);
     const dateCol = resolveFieldForCols(cols, f.platform, "date");
+    const naverCampaignCol = f.platform === "naver" ? resolveFieldForCols(cols, "naver", "campaign") : null;
     // 품목 분류는 INDEX 조회표가 준비돼야 한다. raw 파일 fetch가 INDEX
     // fetch보다 먼저 끝나는 경우(특히 withFullCoupangRows처럼 이미 로드된
     // 뒤에 다시 부를 때는 즉시 반환됨)를 대비해 분류 직전에 기다린다.
@@ -1147,14 +1163,14 @@
       out.__platform = f.platform;
       out.__file = f.name;
       out.__filePath = f.path;
-      out.__productType = productType;
+      out.__productType = f.platform === "naver" ? naverRowProductType(out, naverCampaignCol, productType) : productType;
       out.__date = dateCol ? parseDateLoose(out[dateCol]) : null;
       if (f.platform === "coupang") {
         const cls = resolveItemClassification(out, f.path, f.platform, productType);
         out.__item = cls.item;
         out.__subItem = cls.subItem;
       } else {
-        const cls = resolveNaverClassification(out, f.path, productType);
+        const cls = resolveNaverClassification(out, f.path, out.__productType);
         out.__item = cls.item;
         out.__subItem = null;
         out.__model = cls.model;
@@ -2900,9 +2916,9 @@
           values: [
             `${yearOf(date)}년`, monthLabel, weekNameLabel(date), localDate(date),
             item, sop, gfaAdTypeLabel(productType), campaignRaw,
-            isAdvoost ? (hit && hit.model) || String(row["상품명"] ?? "").trim() || "-" : `카탈로그${sop ? `_${sop}` : ""}`,
-            isAdvoost ? row[productIdCol] : "카탈로그",
-            isAdvoost ? String(row["상품명"] ?? "").trim() : "카탈로그",
+            isAdvoost ? (hit && hit.model) || String(row["상품명"] ?? "").trim() || "-" : `${productType}${sop ? `_${sop}` : ""}`,
+            isAdvoost ? row[productIdCol] : productType,
+            isAdvoost ? String(row["상품명"] ?? "").trim() : productType,
           ],
           cls: hit ? hit.cls : "",
           metrics: {},
