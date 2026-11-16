@@ -131,9 +131,21 @@
     },
     {
       "platform": "naver",
+      "name": "(이커머스)SSA_검색어_위클리,1919967_261109_261115.csv",
+      "path": "data/naver/(이커머스)SSA_검색어_위클리,1919967_261109_261115.csv",
+      "size": 1758757
+    },
+    {
+      "platform": "naver",
       "name": "(이커머스)SSA_위클리,1919967_261102_261108.csv",
       "path": "data/naver/(이커머스)SSA_위클리,1919967_261102_261108.csv",
       "size": 69063
+    },
+    {
+      "platform": "naver",
+      "name": "(이커머스)SSA_위클리,1919967_261109_261115.csv",
+      "path": "data/naver/(이커머스)SSA_위클리,1919967_261109_261115.csv",
+      "size": 70846
     },
     {
       "platform": "naver",
@@ -173,6 +185,12 @@
     },
     {
       "platform": "naver",
+      "name": "네이버_GFA_공계정_애드부스트_261116.csv",
+      "path": "data/naver/네이버_GFA_공계정_애드부스트_261116.csv",
+      "size": 102848
+    },
+    {
+      "platform": "naver",
       "name": "네이버_GFA_공계정_카탈로그_261101.csv",
       "path": "data/naver/네이버_GFA_공계정_카탈로그_261101.csv",
       "size": 1706
@@ -182,6 +200,12 @@
       "name": "네이버_GFA_공계정_카탈로그_261109.csv",
       "path": "data/naver/네이버_GFA_공계정_카탈로그_261109.csv",
       "size": 8589
+    },
+    {
+      "platform": "naver",
+      "name": "네이버_GFA_공계정_카탈로그_261116.csv",
+      "path": "data/naver/네이버_GFA_공계정_카탈로그_261116.csv",
+      "size": 7005
     },
     {
       "platform": "naver",
@@ -197,6 +221,12 @@
     },
     {
       "platform": "naver",
+      "name": "네이버_GFA_팀계정_애드부스트_261116.csv",
+      "path": "data/naver/네이버_GFA_팀계정_애드부스트_261116.csv",
+      "size": 24293
+    },
+    {
+      "platform": "naver",
       "name": "네이버_GFA_팀계정_카탈로그_261101.csv",
       "path": "data/naver/네이버_GFA_팀계정_카탈로그_261101.csv",
       "size": 1087
@@ -206,6 +236,12 @@
       "name": "네이버_GFA_팀계정_카탈로그_261109.csv",
       "path": "data/naver/네이버_GFA_팀계정_카탈로그_261109.csv",
       "size": 6158
+    },
+    {
+      "platform": "naver",
+      "name": "네이버_GFA_팀계정_카탈로그_261116.csv",
+      "path": "data/naver/네이버_GFA_팀계정_카탈로그_261116.csv",
+      "size": 6519
     },
     {
       "platform": "naver",
