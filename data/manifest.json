@@ -359,12 +359,6 @@
     },
     {
       "platform": "naver",
-      "name": "네이버_GFA_팀계정_카탈로그_261123.csv",
-      "path": "data/naver/네이버_GFA_팀계정_카탈로그_261123.csv",
-      "size": 23224
-    },
-    {
-      "platform": "naver",
       "name": "네이버_쇼핑검색광고_검색어_,1919967_261101.csv",
       "path": "data/naver/네이버_쇼핑검색광고_검색어_,1919967_261101.csv",
       "size": 158338
