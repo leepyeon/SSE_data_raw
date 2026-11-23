@@ -1010,9 +1010,9 @@
     return item ? { item, subItem: item } : null;
   }
 
-  // 품목 -> 사업부(CE/MX). 웨어러블/모바일/태블릿은 MX, 그 외 알려진 품목은 CE,
+  // 품목 -> 사업부(CE/MX). 웨어러블/모바일/태블릿/노트북은 MX, 그 외 알려진 품목은 CE,
   // "미분류"는 사업부를 특정할 수 없으므로 null.
-  const MX_ITEMS = new Set(["웨어러블", "모바일", "태블릿"]);
+  const MX_ITEMS = new Set(["웨어러블", "모바일", "태블릿", "노트북"]);
   function classifyDivision(item) {
     if (!item || item === "미분류") return null;
     return MX_ITEMS.has(item) ? "MX" : "CE";
