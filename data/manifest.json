@@ -110,6 +110,15 @@
     },
     {
       "platform": "coupang",
+      "name": "A00111021_pa_daily_keyword_CE_PA_20261116_20261122.xlsx",
+      "path": "data/coupang/A00111021_pa_daily_keyword_CE_PA_20261116_20261122.xlsx",
+      "size": 7332271,
+      "cache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_PA_20261116_20261122.xlsx.json",
+      "fullCache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_PA_20261116_20261122.xlsx.full.json",
+      "keywordCache": "data/cache/coupang/A00111021_pa_daily_keyword_CE_PA_20261116_20261122.xlsx.keywords.json"
+    },
+    {
+      "platform": "coupang",
       "name": "A00534677_pa_daily_keyword_MX_20261001_20261031.xlsb",
       "path": "data/coupang/A00534677_pa_daily_keyword_MX_20261001_20261031.xlsb",
       "size": 1415631,
