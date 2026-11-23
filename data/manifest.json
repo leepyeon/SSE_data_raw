@@ -50,6 +50,18 @@
     },
     {
       "platform": "coupang",
+      "name": "2620261123_A00111021_custom_report_CE_NCA.xlsx",
+      "path": "data/coupang/2620261123_A00111021_custom_report_CE_NCA.xlsx",
+      "size": 42394
+    },
+    {
+      "platform": "coupang",
+      "name": "2620261123_A00534677_custom_report_MX_NCA.xlsx",
+      "path": "data/coupang/2620261123_A00534677_custom_report_MX_NCA.xlsx",
+      "size": 98513
+    },
+    {
+      "platform": "coupang",
       "name": "A00111021_ba_daily_adGroup_CE_BA_20261102_20261108.xlsx",
       "path": "data/coupang/A00111021_ba_daily_adGroup_CE_BA_20261102_20261108.xlsx",
       "size": 51787
@@ -134,6 +146,15 @@
     },
     {
       "platform": "coupang",
+      "name": "A00534677_pa_daily_keyword_MX_PA_20261116_20261122.xlsx",
+      "path": "data/coupang/A00534677_pa_daily_keyword_MX_PA_20261116_20261122.xlsx",
+      "size": 1967522,
+      "cache": "data/cache/coupang/A00534677_pa_daily_keyword_MX_PA_20261116_20261122.xlsx.json",
+      "fullCache": "data/cache/coupang/A00534677_pa_daily_keyword_MX_PA_20261116_20261122.xlsx.full.json",
+      "keywordCache": "data/cache/coupang/A00534677_pa_daily_keyword_MX_PA_20261116_20261122.xlsx.keywords.json"
+    },
+    {
+      "platform": "coupang",
       "name": "A01703872_pa_daily_keyword_CE(하만)_20261001_20261031 1.xlsx",
       "path": "data/coupang/A01703872_pa_daily_keyword_CE(하만)_20261001_20261031 1.xlsx",
       "size": 875662,
@@ -158,6 +179,15 @@
       "cache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_PA_20261102_20261108.xlsx.json",
       "fullCache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_PA_20261102_20261108.xlsx.full.json",
       "keywordCache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_PA_20261102_20261108.xlsx.keywords.json"
+    },
+    {
+      "platform": "coupang",
+      "name": "A01703872_pa_daily_keyword_CE(하만)_PA_20261116_20261122.xlsx",
+      "path": "data/coupang/A01703872_pa_daily_keyword_CE(하만)_PA_20261116_20261122.xlsx",
+      "size": 173585,
+      "cache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_PA_20261116_20261122.xlsx.json",
+      "fullCache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_PA_20261116_20261122.xlsx.full.json",
+      "keywordCache": "data/cache/coupang/A01703872_pa_daily_keyword_CE(하만)_PA_20261116_20261122.xlsx.keywords.json"
     },
     {
       "platform": "coupang",
