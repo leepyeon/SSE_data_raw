@@ -1443,7 +1443,11 @@
       if (!btn.disabled) btn.title = weekOf(options.weeks[i]).label;
     }
     renderSlicerGroup("divisionSlicer", options.divisions, f.divisions, null, av.divisions);
-    renderSlicerGroup("productTypeSlicer", options.productTypes, f.productTypes, null, av.productTypes);
+    renderSlicerGroup("productTypeSlicer", options.productTypes, f.productTypes, productTypeLabel, av.productTypes);
+    // 약칭 버튼에 마우스를 올리면 원래 광고상품유형 이름이 보이게 한다.
+    [...el("productTypeSlicer").querySelectorAll(".slicer-btn")].forEach((btn, i) => {
+      if (!btn.disabled) btn.title = options.productTypes[i];
+    });
     renderSlicerGroup("itemCategorySlicer", options.itemCategories, f.itemCategories, null, av.itemCategories);
     renderSlicerGroup("subItemSlicer", options.subItems, f.subItems, null, av.subItems, "품목을 고르면 상세 품목이 나옵니다");
     // 구분(CE·MX)/상세 품목은 쿠팡 전용이라 네이버 탭에서는 줄 자체를 숨긴다
@@ -1481,9 +1485,25 @@
       .join("");
   }
 
+  // 대시보드 화면에만 쓰는 광고상품유형 약칭. 내부 값과 RAW 다운로드 파일에는
+  // 원래 이름(PA, 애드부스트 등)을 그대로 쓴다.
+  const PRODUCT_TYPE_LABELS = {
+    BA: "B",
+    NCA: "N",
+    PA: "P",
+    "쇼핑검색광고(카탈로그)": "SS(C)",
+    쇼핑고객확장: "G_SC",
+    애드부스트: "G_A",
+    카탈로그: "G_C",
+  };
+  function productTypeLabel(v) {
+    return PRODUCT_TYPE_LABELS[v] ?? v;
+  }
+
   const TEXT_COLUMN_KEYS = new Set(["rank", "productType", "productName", "viid", "campaign", "group", "weekLabel", "itemCategory", "placement", "monthLabel", "keyword"]);
 
   function cellText(row, col) {
+    if (col.key === "productType") return productTypeLabel(row.productType ?? "");
     if (TEXT_COLUMN_KEYS.has(col.key)) {
       return row[col.key] ?? "";
     }
