@@ -6,13 +6,13 @@
 <!-- 검색엔진에 이 페이지가 노출/저장되지 않게 한다 -->
 <meta name="robots" content="noindex, nofollow, noarchive" />
 <meta name="referrer" content="no-referrer" />
-<title>쿠팡 · 네이버 광고 리포트</title>
+<title>대시보드</title>
 <link rel="stylesheet" href="assets/style.css?v=13" />
 </head>
 <body class="locked">
 <div class="lock-screen" id="lockScreen">
   <form class="lock-card" id="lockForm" autocomplete="off">
-    <h1>쿠팡 · 네이버 광고 리포트</h1>
+    <h1>대시보드</h1>
     <label for="lockPassword">비밀번호를 입력해 주세요</label>
     <input type="password" id="lockPassword" autocomplete="current-password" required />
     <button class="primary" type="submit">확인</button>
@@ -23,15 +23,15 @@
 
   <div class="topbar">
     <div>
-      <h1>쿠팡 · 네이버 광고 리포트</h1>
+      <h1>대시보드</h1>
       <div class="subtitle">data/coupang, data/naver 폴더에 올라온 raw csv/xlsx를 자동으로 읽어서 보여줍니다.</div>
     </div>
     <button class="theme-toggle" id="themeToggle" type="button">화면 모드 전환</button>
   </div>
 
   <div class="platform-tabs" id="platformTabs">
-    <button class="tab-btn active" data-platform="coupang" type="button">쿠팡</button>
-    <button class="tab-btn" data-platform="naver" type="button">네이버</button>
+    <button class="tab-btn active" data-platform="coupang" type="button" title="쿠팡">C</button>
+    <button class="tab-btn" data-platform="naver" type="button" title="네이버">N</button>
   </div>
 
   <div class="loading-banner" id="loadingBanner">
@@ -185,9 +185,9 @@
       <div class="card" id="rawDownloadCard">
         <h2>원본 다운로드</h2>
         <div class="toolbar-actions">
-          <button class="primary platform-only" data-platform="coupang" id="downloadReportBtn" type="button">쿠팡 상품광고 RAW 다운받기</button>
-          <button class="primary platform-only" data-platform="naver" id="downloadGfaReportBtn" type="button">GFA RAW 다운받기</button>
-          <button class="primary platform-only" data-platform="naver" id="downloadShoppingSearchBtn" type="button">쇼핑검색광고(카탈로그형) RAW 다운받기</button>
+          <button class="primary platform-only" data-platform="coupang" id="downloadReportBtn" type="button" title="쿠팡 상품광고 RAW">C_RAW 다운받기</button>
+          <button class="primary platform-only" data-platform="naver" id="downloadGfaReportBtn" type="button" title="네이버 GFA RAW">G_RAW 다운받기</button>
+          <button class="primary platform-only" data-platform="naver" id="downloadShoppingSearchBtn" type="button" title="네이버 쇼핑검색광고(카탈로그형) RAW">SS_RAW 다운받기</button>
         </div>
       </div>
 
@@ -207,6 +207,6 @@
 <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js" integrity="sha384-D/t0ZMqQW31H3az8ktEiNb39wyKnS82iFY52QPACM+IjKW3jDUhyIgh2PApRqJZs" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" integrity="sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw" crossorigin="anonymous"></script>
 <!-- app.js를 바꿀 때마다 아래 v= 숫자를 올려서, 예전 파일이 브라우저에 캐시되어 남아있는 문제를 방지합니다. -->
-<script src="assets/app.js?v=52"></script>
+<script src="assets/app.js?v=53"></script>
 </body>
 </html>
